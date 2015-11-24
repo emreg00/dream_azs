@@ -75,32 +75,32 @@ create.features<-function(f, is.train=T) {
     g = get.drug.info(paste0(data.dir, "Drug_info_release.csv"))
     # Get GUILD scores
     if(is.train) {
-        h = read.table(paste0(data.dir, "guild_noexp.dat"), header=T) 
+	h = read.table(paste0(data.dir, "guild_noexp.dat"), header=T) 
     } else {
-        h = read.table(paste0(data.dir, "guild_test_noexp.dat"), header=T)
+	h = read.table(paste0(data.dir, "guild_test_noexp.dat"), header=T)
     }
     x = data.frame()
 
     for(i in 1:nrow(f)) {
-        cell.line = as.character(f[i, "CELL_LINE"])
-        compound.A = as.character(f[i, "COMPOUND_A"])
-        compound.B = as.character(f[i, "COMPOUND_B"])
-        comb.id = as.character(f[i, "COMBINATION_ID"])
-        targets.A = as.character(g[compound.A, "Target.Official.Symbol."])
-        targets.B = as.character(g[compound.B, "Target.Official.Symbol."])
-        a = unlist(strsplit(targets.A, ","))
-        b = unlist(strsplit(targets.B, ","))
-        #print(c(cell.line, a))
-        #print(d[a,cell.line])
-        f[i, "gexp_A"] = mean(d[a,cell.line], rm.na=T)
-        f[i, "gexp_B"] = mean(d[b,cell.line], rm.na=T)
-        f[i, "mut_A"] = mean(e[e$gene %in% targets.A & e$cell_line_name == cell.line,"mut"], rm.na=T)
-        f[i, "mut_B"] = mean(e[e$gene %in% targets.B & e$cell_line_name == cell.line,"mut"], rm.na=T)
-        a = h[h$comb.id == comb.id & h$cell.line == cell.line, c("med", "mean", "sd", "max", "min")] # "max.a", "max.b", 
-        if(nrow(a) == 0) {
-            a[1,] = 0
-        }
-        x = rbind(x, a)
+	cell.line = as.character(f[i, "CELL_LINE"])
+	compound.A = as.character(f[i, "COMPOUND_A"])
+	compound.B = as.character(f[i, "COMPOUND_B"])
+	comb.id = as.character(f[i, "COMBINATION_ID"])
+	targets.A = as.character(g[compound.A, "Target.Official.Symbol."])
+	targets.B = as.character(g[compound.B, "Target.Official.Symbol."])
+	a = unlist(strsplit(targets.A, ","))
+	b = unlist(strsplit(targets.B, ","))
+	#print(c(cell.line, a))
+	#print(d[a,cell.line])
+	f[i, "gexp_A"] = mean(d[a,cell.line], rm.na=T)
+	f[i, "gexp_B"] = mean(d[b,cell.line], rm.na=T)
+	f[i, "mut_A"] = mean(e[e$gene %in% targets.A & e$cell_line_name == cell.line,"mut"], rm.na=T)
+	f[i, "mut_B"] = mean(e[e$gene %in% targets.B & e$cell_line_name == cell.line,"mut"], rm.na=T)
+	a = h[h$comb.id == comb.id & h$cell.line == cell.line, c("med", "mean", "sd", "max", "min")] # "max.a", "max.b", 
+	if(nrow(a) == 0) {
+	    a[1,] = 0
+	}
+	x = rbind(x, a)
     }   
     f[is.na(f$gexp_A),"gexp_A"] = 0
     f[is.na(f$gexp_B),"gexp_B"] = 0
@@ -122,16 +122,16 @@ train.model<-function(challenge) {
     #indices = which(colnames(f) %in% c("med", "mean", "sd", "max", "min", "cat")) # only guild
     # Use all features
     if(challenge == "ch1a") {
-        inTrain = createDataPartition(y = f$cat, p = 0.7, list=F) 
-        training = f[inTrain, c(4:11, indices)]
-        testing = f[-inTrain, c(4:11, indices)]
+	inTrain = createDataPartition(y = f$cat, p = 0.7, list=F) 
+	training = f[inTrain, c(4:11, indices)]
+	testing = f[-inTrain, c(4:11, indices)]
     # Use anything except monotherapy data
     } else if(challenge == "ch1b") {
-        inTrain = createDataPartition(y = f$cat, p = 0.7, list=F) 
-        training = f[inTrain, indices]
-        testing = f[-inTrain, indices]
+	inTrain = createDataPartition(y = f$cat, p = 0.7, list=F) 
+	training = f[inTrain, indices]
+	testing = f[-inTrain, indices]
     } else {    
-        stop("Unrecognized challenge!")
+	stop("Unrecognized challenge!")
     }
 
     # Build model(s)
@@ -184,32 +184,32 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     indices = c(indices, which(colnames(f) %in% c("med", "mean", "sd", "max", "min")))
     # Use all features
     if(challenge == "ch1a") {
-        #! fun.scale = function(x) { x$syn.einf * (1 + x$Einf_A + x$Einf_B) } #! do these need to be scaled / centered?
-        fun.scale = function(x) { x$syn } 
-        testing = f[, c(4:11, indices)]
+	#! fun.scale = function(x) { x$syn.einf * (1 + x$Einf_A + x$Einf_B) } #! do these need to be scaled / centered?
+	fun.scale = function(x) { x$syn } 
+	testing = f[, c(4:11, indices)]
     # Use anything except monotherapy data
     } else if(challenge == "ch1b") {
-        fun.scale = function(x) { x$syn } 
-        testing = f[, indices]
+	fun.scale = function(x) { x$syn } 
+	testing = f[, indices]
     } else {    
-        stop("Unrecognized challenge!")
+	stop("Unrecognized challenge!")
     }
 
     # Build models using all the training data
     if(rebuild) { 
-        # Get training data
-        f.training = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge)
-        if(challenge == "ch1a") {
-            training = f.training[, c(4:11, indices)]
-        } else if(challenge == "ch1b") {
-            training = f.training[, indices]
-        }
-        ctrl = trainControl(method = "cv")
-        prep = c("center", "scale")
-        # Random forest
-        rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl)
-        # Tree boost
-        gbmFit = train(cat ~ ., data=training, method = "gbm", preProcess = prep, trControl = ctrl)
+	# Get training data
+	f.training = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge)
+	if(challenge == "ch1a") {
+	    training = f.training[, c(4:11, indices)]
+	} else if(challenge == "ch1b") {
+	    training = f.training[, indices]
+	}
+	ctrl = trainControl(method = "cv")
+	prep = c("center", "scale")
+	# Random forest
+	rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl)
+	# Tree boost
+	gbmFit = train(cat ~ ., data=training, method = "gbm", preProcess = prep, trControl = ctrl)
     }
 
     # Make predictions using model(s)
@@ -293,20 +293,20 @@ explore<-function() {
     y.2 = data.frame(syn.1=NA, syn.2=NA)
     y = data.frame(ic.1=NA, ic.2=NA)
     for(i in 1:nrow(k)) {
-        comb = rownames(comb.count)[k[i, 1]]
-        cell = gsub("\\.", "-", colnames(comb.count)[k[i, 2]])
-        #print(c(comb, cell))
-        x = f[f$COMBINATION_ID == comb & f$CELL_LINE==cell,]
-        for(m in 1:(nrow(x)-1)) {
-            for(n in (m+1):nrow(x)) {
-                y.1 = rbind(y.1, c(x[m, "syn"], x[n, "syn"]))
-                #y.1 = rbind(y.1, c(x[m, "ic"], x[n, "ic"]))
-                y.2 = rbind(y.2, c(x[m, "syn.einf"], x[n, "syn.einf"]))
-                #y.2 = rbind(y.2, c(x[m, "ic.2"], x[n, "ic.2"]))
-                y = rbind(y, c(x[m, "IC50_A"], x[n, "IC50_A"]))
-                y = rbind(y, c(x[m, "IC50_B"], x[n, "IC50_B"]))
-            }
-        }
+	comb = rownames(comb.count)[k[i, 1]]
+	cell = gsub("\\.", "-", colnames(comb.count)[k[i, 2]])
+	#print(c(comb, cell))
+	x = f[f$COMBINATION_ID == comb & f$CELL_LINE==cell,]
+	for(m in 1:(nrow(x)-1)) {
+	    for(n in (m+1):nrow(x)) {
+		y.1 = rbind(y.1, c(x[m, "syn"], x[n, "syn"]))
+		#y.1 = rbind(y.1, c(x[m, "ic"], x[n, "ic"]))
+		y.2 = rbind(y.2, c(x[m, "syn.einf"], x[n, "syn.einf"]))
+		#y.2 = rbind(y.2, c(x[m, "ic.2"], x[n, "ic.2"]))
+		y = rbind(y, c(x[m, "IC50_A"], x[n, "IC50_A"]))
+		y = rbind(y, c(x[m, "IC50_B"], x[n, "IC50_B"]))
+	    }
+	}
     }
 
     a = cor(y, use="complete", method="spearman")
@@ -323,49 +323,49 @@ explore<-function() {
 
     # Check synergy consistency in similar cell lines   
     selection.function<-function(col.values, mapping) {
-        #tapply(col.values, mapping, function(x) { x[which.max(abs(x))] })
-        tapply(col.values, mapping, function(x) { mean(x) })
+	#tapply(col.values, mapping, function(x) { x[which.max(abs(x))] })
+	tapply(col.values, mapping, function(x) { mean(x) })
     }
     arr.cor = cor(d)
     arr.cor[upper.tri(arr.cor, diag=T)] = NA
     k = which(arr.cor>0.9, arr.ind=T)
     for(i in 1:nrow(k)) {
-        cell.1 = gsub("\\.", "-", rownames(arr.cor)[k[i, 1]])
-        cell.2 = gsub("\\.", "-", colnames(arr.cor)[k[i, 2]])
-        #cell.1 = "MDA-MB-231"
-        #cell.2 = "T-24"
-        print(c(cell.1, cell.2))
-        x = f[f$CELL_LINE==cell.1,]
-        y = f[f$CELL_LINE==cell.2,]
-        comb.common = intersect(x$COMBINATION_ID, y$COMBINATION_ID)
-        if(length(comb.common) == 0) {
-            next();
-        }
-        a = x[x$COMBINATION_ID %in% comb.common, ]
-        b = y[y$COMBINATION_ID %in% comb.common, ]
-        a = a[order(a$COMBINATION_ID),]
-        b = b[order(b$COMBINATION_ID),]
-        #print(a)
-        #print(b)
-        # average multiple combinations 
-        mapping = factor(a$COMBINATION_ID)
-        #a = apply(a[4:12], 2, function(val) { selection.function(val, mapping)})
-        a = data.frame(lapply(a[4:12], function(val) { selection.function(val, mapping)}))
-        mapping = factor(b$COMBINATION_ID)
-        #b = apply(b[4:12], 2, function(val) { selection.function(val, mapping)})
-        b = data.frame(lapply(b[4:12], function(val) { selection.function(val, mapping)}))
-        #print(a)
-        #print(b)
-        par(mfrow=c(1,2))
-        vals.a = a[,"SYNERGY_SCORE"]
-        vals.b = b[,"SYNERGY_SCORE"]
-        plot(vals.a, vals.b)
-        print(cor(vals.a, vals.b))#, method="spearman"))
-        vals.a = a[,"SYNERGY_SCORE"] / (1+a[,"Einf_A"]+a[,"Einf_B"])
-        vals.b = b[,"SYNERGY_SCORE"] / (1+b[,"Einf_A"]+b[,"Einf_B"])
-        plot(vals.a, vals.b)
-        print(cor(vals.a, vals.b))#, method="spearman"))
-        #readline(prompt = "Pause. Press <Enter> to continue...")
+	cell.1 = gsub("\\.", "-", rownames(arr.cor)[k[i, 1]])
+	cell.2 = gsub("\\.", "-", colnames(arr.cor)[k[i, 2]])
+	#cell.1 = "MDA-MB-231"
+	#cell.2 = "T-24"
+	print(c(cell.1, cell.2))
+	x = f[f$CELL_LINE==cell.1,]
+	y = f[f$CELL_LINE==cell.2,]
+	comb.common = intersect(x$COMBINATION_ID, y$COMBINATION_ID)
+	if(length(comb.common) == 0) {
+	    next();
+	}
+	a = x[x$COMBINATION_ID %in% comb.common, ]
+	b = y[y$COMBINATION_ID %in% comb.common, ]
+	a = a[order(a$COMBINATION_ID),]
+	b = b[order(b$COMBINATION_ID),]
+	#print(a)
+	#print(b)
+	# average multiple combinations 
+	mapping = factor(a$COMBINATION_ID)
+	#a = apply(a[4:12], 2, function(val) { selection.function(val, mapping)})
+	a = data.frame(lapply(a[4:12], function(val) { selection.function(val, mapping)}))
+	mapping = factor(b$COMBINATION_ID)
+	#b = apply(b[4:12], 2, function(val) { selection.function(val, mapping)})
+	b = data.frame(lapply(b[4:12], function(val) { selection.function(val, mapping)}))
+	#print(a)
+	#print(b)
+	par(mfrow=c(1,2))
+	vals.a = a[,"SYNERGY_SCORE"]
+	vals.b = b[,"SYNERGY_SCORE"]
+	plot(vals.a, vals.b)
+	print(cor(vals.a, vals.b))#, method="spearman"))
+	vals.a = a[,"SYNERGY_SCORE"] / (1+a[,"Einf_A"]+a[,"Einf_B"])
+	vals.b = b[,"SYNERGY_SCORE"] / (1+b[,"Einf_A"]+b[,"Einf_B"])
+	plot(vals.a, vals.b)
+	print(cor(vals.a, vals.b))#, method="spearman"))
+	#readline(prompt = "Pause. Press <Enter> to continue...")
     }
 }
 
@@ -389,15 +389,15 @@ old<-function() {
     for(method in methods) {
     print(method)
     if(method == "rf") {
-        # Random forest
-        m = train(variable.formula, data = training, method = "rf", prox = T) 
-        # getTree for individual trees
-        # rfcv
+	# Random forest
+	m = train(variable.formula, data = training, method = "rf", prox = T) 
+	# getTree for individual trees
+	# rfcv
     } else if(method == "gbm") {
-        # Boost w/ trees
-        m = train(variable.formula, data = training, method = "gbm", verbose = F) 
+	# Boost w/ trees
+	m = train(variable.formula, data = training, method = "gbm", verbose = F) 
     } else if(method == "glm") {
-        m = train(variable.formula, data = training, method ="glm", preProcess="pca")
+	m = train(variable.formula, data = training, method ="glm", preProcess="pca")
     }
     pred = predict(m, testing)
     print(pred)
