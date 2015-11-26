@@ -1,0 +1,22 @@
+
+Useful R packages
+
+Prrophetic
+http://www.ncbi.nlm.nih.gov/pubmed/25229481
+http://genemed.uchicago.edu/~pgeeleher/pRRophetic/
+
+Pharmacogx
+https://cran.r-project.org/web/packages/PharmacoGx/index.html
+
+Drexplorer
+http://www.ncbi.nlm.nih.gov/pubmed/25600946
+
+TODO:
+- remove insensitive / highly varying (sd of synergy) cell lines 
+- feature selection (remove correlated)
+- handling missing values
+- correction for cell / drug drift (overall high / low)
+- using pathway & cosmic genes as features
+- using drug similarity (target or formula) as feature
+- using disease similarity (gexp correlation) as feature
+
