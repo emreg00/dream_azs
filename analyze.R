@@ -8,9 +8,10 @@ output.dir = "../doc/"
 main<-function() {
     set.seed(142341)
     #set.seed(999999)
-    #explore()
     challenge = "ch1a"
     #challenge = "ch1b"
+    #explore()
+    #synergy.consistency()
     mod.list = train.model(challenge)
     rfFit = mod.list$rfFit
     gbmFit = mod.list$gbmFit
@@ -21,18 +22,12 @@ main<-function() {
 
 get.synergy.data<-function(file.name, challenge) {
     f = read.csv(paste0(data.dir, file.name))
-    f$syn = f[,"SYNERGY_SCORE"]
-    f$syn.einf = f[,"SYNERGY_SCORE"] / (1 + f[, "Einf_A"] + f[, "Einf_B"])
-    f$syn.ic = f[,"SYNERGY_SCORE"] / (1 + f[, "IC50_A"] + f[, "IC50_B"])
+    #f$syn = f[,"SYNERGY_SCORE"]
+    #f$syn.einf = f[,"SYNERGY_SCORE"] / (1 + f[, "Einf_A"] + f[, "Einf_B"])
+    #f$syn.ic = f[,"SYNERGY_SCORE"] / (1 + f[, "IC50_A"] + f[, "IC50_B"])
     #f$cut = cut(f[,"syn"], breaks=c(-10000, -100, -50, -10, 0, 10, 50, 100, 10000), labels=c("high-negative", "negative", "low-negative", "low-positive", "positive", "high-positive"))
+    f$cat = f[,"SYNERGY_SCORE"]
     f = f[f$QA==1,]
-    f$cat = f$syn 
-    #! Not sure why syn.einf is not working
-    #if(challenge == "ch1a") {
-    #    f$cat = f$syn.einf # Challange 1A
-    #} else if(challenge == "ch1b") {
-    #    f$cat = f$syn # Challange 1B
-    #}
     return(f);
 }
 
@@ -63,10 +58,7 @@ get.drug.info<-function(file.name) {
 }
 
 
-# add expression of genes (possibly with PCA or use lasso or pathway based filtering)
-# add mutation info of genes (possibly with PCA or use lasso or pathway based filtering)
-# add target - mutated gene info (i.e. distance in interactome / GUILD etc...)
-create.features<-function(f, is.train=T) {
+create.features<-function(f, challenge, is.train=T) {
     # Get expression info
     d = get.expression.info(paste0(data.dir, "gex.csv"))
     # Get mutation info 
@@ -98,15 +90,48 @@ create.features<-function(f, is.train=T) {
 	f[i, "mut_B"] = mean(e[e$gene %in% targets.B & e$cell_line_name == cell.line,"mut"], rm.na=T)
 	a = h[h$comb.id == comb.id & h$cell.line == cell.line, c("med", "mean", "sd", "max", "min")] # "max.a", "max.b", 
 	if(nrow(a) == 0) {
-	    a[1,] = 0
+	    #a[1,] = 0
+	    a[1,] = NA
 	}
 	x = rbind(x, a)
-    }   
-    f[is.na(f$gexp_A),"gexp_A"] = 0
-    f[is.na(f$gexp_B),"gexp_B"] = 0
-    f[is.na(f$mut_A),"mut_A"] = 0
-    f[is.na(f$mut_B),"mut_B"] = 0
+    }
+    # Impute NA values using kNN (during training)
+    #f[is.na(f$gexp_A),"gexp_A"] = 0
+    #f[is.na(f$gexp_B),"gexp_B"] = 0
+    #f[is.na(f$mut_A),"mut_A"] = 0
+    #f[is.na(f$mut_B),"mut_B"] = 0
     f = cbind(f, x)
+    return(f);
+}
+
+
+process.features<-function(f, challenge, is.train=T) {
+    indices = which(colnames(f) %in% c("gexp_A", "gexp_B", "mut_A", "mut_B", "cat"))
+    indices = c(indices, which(colnames(f) %in% c("med", "sd", "min", "mean", "max")))
+    #indices = which(colnames(f) %in% c("med", "mean", "sd", "max", "min", "cat")) # only guild
+    # Use all features
+    if(challenge == "ch1a") {
+	f = f[, c(4:10, indices)]
+    # Use anything except monotherapy data
+    } else if(challenge == "ch1b") {
+	f = f[, indices]
+    } else {    
+	stop("Unrecognized challenge!")
+    }
+
+    # Check variance 
+    nzv = nearZeroVar(f, saveMetrics= TRUE)
+    print(nzv) 
+    #! Need to do imputation here (not below), otherwise the correlation is NA
+    # Check correlated features
+    cor.mat = cor(f)
+    cor.idx <- findCorrelation(cor.mat, cutoff = .75)
+    print(c("Removing:", colnames(f)[cor.idx]))
+    if(length(cor.idx) > 0) {
+	f = f[,-cor.idx]
+    }
+    #! Remove insensitive cell lines (Einf)
+    #! Remove drugs / cells with high synergy variance
     return(f);
 }
 
@@ -115,31 +140,19 @@ train.model<-function(challenge) {
     # Get synergy training data
     f = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge)
     # Create expression and mutation based features
-    f = create.features(f, is.train=T)
+    f = create.features(f, challenge, is.train=T)
+    f = process.features(f, challenge, is.train=T)
 
-    indices = which(colnames(f) %in% c("gexp_A", "gexp_B", "mut_A", "mut_B", "cat"))
-    indices = c(indices, which(colnames(f) %in% c("med", "mean", "sd", "max", "min")))
-    #indices = which(colnames(f) %in% c("med", "mean", "sd", "max", "min", "cat")) # only guild
-    # Use all features
-    if(challenge == "ch1a") {
-	inTrain = createDataPartition(y = f$cat, p = 0.7, list=F) 
-	training = f[inTrain, c(4:11, indices)]
-	testing = f[-inTrain, c(4:11, indices)]
-    # Use anything except monotherapy data
-    } else if(challenge == "ch1b") {
-	inTrain = createDataPartition(y = f$cat, p = 0.7, list=F) 
-	training = f[inTrain, indices]
-	testing = f[-inTrain, indices]
-    } else {    
-	stop("Unrecognized challenge!")
-    }
+    inTrain = createDataPartition(y = f$cat, p = 0.7, list=F) 
+    training = f[inTrain, ] 
+    testing = f[-inTrain, ]
 
     # Build model(s)
     # trainControl: boot for bootstrapping, cv for x-validation # repeatedcv for repeated 10-fold CV 
     ctrl = trainControl(method = "cv") #method = "repeatedcv", number = 10, repeats = 10)
-    prep = c("center", "scale")
+    prep = c("center", "scale", "knnImpute") 
     # Random forest
-    rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl)
+    rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl) # using default for kNN, k=5
     pred = predict(rfFit, testing)
     a = cor(pred, testing$cat) 
     print(a)
@@ -174,38 +187,21 @@ train.model<-function(challenge) {
 
 
 get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
-
     # Get test data
     f = get.synergy.data("Drug_synergy_data/ch1_leaderBoard_monoTherapy.csv", challenge)
     # Create expression and mutation based features
-    f = create.features(f, is.train=F)
-
-    indices = which(colnames(f) %in% c("gexp_A", "gexp_B", "mut_A", "mut_B", "cat"))
-    indices = c(indices, which(colnames(f) %in% c("med", "mean", "sd", "max", "min")))
-    # Use all features
-    if(challenge == "ch1a") {
-	#! fun.scale = function(x) { x$syn.einf * (1 + x$Einf_A + x$Einf_B) } #! do these need to be scaled / centered?
-	fun.scale = function(x) { x$syn } 
-	testing = f[, c(4:11, indices)]
-    # Use anything except monotherapy data
-    } else if(challenge == "ch1b") {
-	fun.scale = function(x) { x$syn } 
-	testing = f[, indices]
-    } else {    
-	stop("Unrecognized challenge!")
-    }
+    f = create.features(f, challenge, is.train=F)
+    f = process.features(f, challenge, is.train=F)
+    testing = f
 
     # Build models using all the training data
     if(rebuild) { 
 	# Get training data
 	f.training = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge)
-	if(challenge == "ch1a") {
-	    training = f.training[, c(4:11, indices)]
-	} else if(challenge == "ch1b") {
-	    training = f.training[, indices]
-	}
+	f.training = create.features(f.training, challenge, is.train=T)
+	training = f.training
 	ctrl = trainControl(method = "cv")
-	prep = c("center", "scale")
+	prep = c("center", "scale", "knnImpute")
 	# Random forest
 	rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl)
 	# Tree boost
@@ -220,9 +216,7 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     pred = predict(modFit, pred.comb)
 
     # Get predictions for leaderboard data (normalize with einf if using sny.einf)
-    testing$syn.einf = pred
     testing$syn = pred
-    testing$cat = fun.scale(testing)
 
     # Get confidence scores for learderboard data (assign lower confidence to values >= 10)
     testing$conf = 1-abs(testing$cat)/max(abs(testing$cat))
@@ -254,7 +248,7 @@ explore<-function() {
     indices = c(indices, which(colnames(f) %in% c("med", "mean", "sd", "max", "min")))
     training = f[,indices]
 
-    # Check variance
+    # Check variance 
     nzv = nearZeroVar(training, saveMetrics= TRUE)
     print(nzv) 
 
@@ -269,7 +263,10 @@ explore<-function() {
     print(head(training.processed))
 
     return() 
+}
 
+
+check.synergy.consistency<-function() {
     ggplot(data=e, aes(cell_line_name)) + geom_histogram(stat="bin") + coord_flip()
 
     table(e$cell_line_name, e$mut)
@@ -283,9 +280,10 @@ explore<-function() {
     ggplot(data=g, aes(Einf_A, Einf_B)) + geom_point(aes(color=factor(cut)))
     #artsy
     #ggplot(data=g, aes(Einf_A, Einf_B)) + geom_point(aes(color=factor(cut)), alpha=0.5) + guides(color=F) + theme(text=element_text(size=0), axis.ticks=element_line(size=NA), panel.background=element_rect(fill=NA), panel.border=element_rect(size=NA, fill=NA), panel.grid=element_line(size=NA), panel.grid.minor=element_line(size=NA))
-    #f$ic.2 = f[,"SYNERGY_SCORE"] * (f[, "IC50_A"] * f[, "IC50_B"])
     #f$ic = f[,"SYNERGY_SCORE"] * (1 + f[, "IC50_A"] + f[, "IC50_B"])
-    
+    f$syn = f[,"SYNERGY_SCORE"]
+    f$syn.einf = f[,"SYNERGY_SCORE"] / (1 + f[, "Einf_A"] + f[, "Einf_B"])
+
     # Check synergy consistency in the same cell line (61 cases with multiple instances)
     comb.count = table(f$COMBINATION_ID, f$CELL_LINE)
     k = which(comb.count>1, arr.ind=T)
@@ -302,7 +300,6 @@ explore<-function() {
 		y.1 = rbind(y.1, c(x[m, "syn"], x[n, "syn"]))
 		#y.1 = rbind(y.1, c(x[m, "ic"], x[n, "ic"]))
 		y.2 = rbind(y.2, c(x[m, "syn.einf"], x[n, "syn.einf"]))
-		#y.2 = rbind(y.2, c(x[m, "ic.2"], x[n, "ic.2"]))
 		y = rbind(y, c(x[m, "IC50_A"], x[n, "IC50_A"]))
 		y = rbind(y, c(x[m, "IC50_B"], x[n, "IC50_B"]))
 	    }
