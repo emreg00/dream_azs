@@ -20,7 +20,7 @@ main<-function() {
 }
 
 
-get.synergy.data<-function(file.name, challenge) {
+get.synergy.data<-function(file.name, challenge, is.train) {
     f = read.csv(paste0(data.dir, file.name))
     #f$syn = f[,"SYNERGY_SCORE"]
     #f$syn.einf = f[,"SYNERGY_SCORE"] / (1 + f[, "Einf_A"] + f[, "Einf_B"])
@@ -28,6 +28,13 @@ get.synergy.data<-function(file.name, challenge) {
     #f$cut = cut(f[,"syn"], breaks=c(-10000, -100, -50, -10, 0, 10, 50, 100, 10000), labels=c("high-negative", "negative", "low-negative", "low-positive", "positive", "high-positive"))
     f$cat = f[,"SYNERGY_SCORE"]
     f = f[f$QA==1,]
+    file.name = paste0(data.dir, challenge, ".dat")
+    if(file.exists(file.name)) {
+	f = read.table(f, file.name)
+    } else {
+	f = create.features(f, challenge, is.train)
+	write.table(f, file.name)
+    }
     return(f);
 }
 
@@ -58,7 +65,7 @@ get.drug.info<-function(file.name) {
 }
 
 
-create.features<-function(f, challenge, is.train=T) {
+create.features<-function(f, challenge, is.train) {
     # Get expression info
     d = get.expression.info(paste0(data.dir, "gex.csv"))
     # Get mutation info 
@@ -86,8 +93,8 @@ create.features<-function(f, challenge, is.train=T) {
 	#print(d[a,cell.line])
 	f[i, "gexp_A"] = mean(d[a,cell.line], rm.na=T)
 	f[i, "gexp_B"] = mean(d[b,cell.line], rm.na=T)
-	f[i, "mut_A"] = mean(e[e$gene %in% targets.A & e$cell_line_name == cell.line,"mut"], rm.na=T)
-	f[i, "mut_B"] = mean(e[e$gene %in% targets.B & e$cell_line_name == cell.line,"mut"], rm.na=T)
+	f[i, "mut_A"] = mean(e[e$gene %in% a & e$cell_line_name == cell.line,"mut"], rm.na=T)
+	f[i, "mut_B"] = mean(e[e$gene %in% b & e$cell_line_name == cell.line,"mut"], rm.na=T)
 	a = h[h$comb.id == comb.id & h$cell.line == cell.line, c("med", "mean", "sd", "max", "min")] # "max.a", "max.b", 
 	if(nrow(a) == 0) {
 	    #a[1,] = 0
@@ -109,9 +116,26 @@ process.features<-function(f, challenge, is.train=T) {
     indices = which(colnames(f) %in% c("gexp_A", "gexp_B", "mut_A", "mut_B", "cat"))
     indices = c(indices, which(colnames(f) %in% c("med", "sd", "min", "mean", "max")))
     #indices = which(colnames(f) %in% c("med", "mean", "sd", "max", "min", "cat")) # only guild
+
+    # Remove insensitive cell lines (Einf), lowers 65 to 62
+    library(plyr)
+    d = f
+    d$einf = (d$Einf_A + d$Einf_B) / 2
+    a = ddply(d, ~ CELL_LINE, summarize, syn.sd = sd(cat), syn.min = min(cat), syn.med = median(cat), einf.sd = sd(einf), einf.min = min(einf), einf.med = median(einf))
+    cutoff = 20 # 20 (8 cell lines) # 10 (22 cell lines)
+    # 22RV1 CAL-120 HCC1143 HCC1428 HCC1937 KU-19-19 UACC-812 VCaP
+    cell.lines = as.vector(a[a$einf.min>cutoff,"CELL_LINE"])
+    f = f[!f$CELL_LINE %in% cell.lines,] 
+    # Cells with high min Einf has lower synergy
+    b = cor.test(a$syn.med, a$einf.min, use="complete")
+    print(sprintf("Correlation between einf.min and syn.med: %f %f", b$estimate[[1]], b$p.value)) # -0.235
+
+    #! add drug similarity
+    #! add pathway genes
+
     # Use all features
     if(challenge == "ch1a") {
-	f = f[, c(4:10, indices)]
+	f = f[, c(4:11, indices)]
     # Use anything except monotherapy data
     } else if(challenge == "ch1b") {
 	f = f[, indices]
@@ -122,25 +146,27 @@ process.features<-function(f, challenge, is.train=T) {
     # Check variance 
     nzv = nearZeroVar(f, saveMetrics= TRUE)
     print(nzv) 
-    #! Need to do imputation here (not below), otherwise the correlation is NA
+
+    # Imputing
+    f = predict(preProcess(f, method = c("center", "scale", "knnImpute"), k=5), f) # "BoxCox"
+
     # Check correlated features
     cor.mat = cor(f)
-    cor.idx <- findCorrelation(cor.mat, cutoff = .75)
+    cor.idx = findCorrelation(cor.mat, cutoff = .75)
     print(c("Removing:", colnames(f)[cor.idx]))
     if(length(cor.idx) > 0) {
 	f = f[,-cor.idx]
     }
-    #! Remove insensitive cell lines (Einf)
-    #! Remove drugs / cells with high synergy variance
+    
+    # Models have their built-in feature selection
     return(f);
 }
 
 
 train.model<-function(challenge) {
     # Get synergy training data
-    f = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge)
+    f = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge, is.train=T)
     # Create expression and mutation based features
-    f = create.features(f, challenge, is.train=T)
     f = process.features(f, challenge, is.train=T)
 
     inTrain = createDataPartition(y = f$cat, p = 0.7, list=F) 
@@ -150,7 +176,7 @@ train.model<-function(challenge) {
     # Build model(s)
     # trainControl: boot for bootstrapping, cv for x-validation # repeatedcv for repeated 10-fold CV 
     ctrl = trainControl(method = "cv") #method = "repeatedcv", number = 10, repeats = 10)
-    prep = c("center", "scale", "knnImpute") 
+    prep = c("center", "scale") 
     # Random forest
     rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl) # using default for kNN, k=5
     pred = predict(rfFit, testing)
@@ -188,20 +214,18 @@ train.model<-function(challenge) {
 
 get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     # Get test data
-    f = get.synergy.data("Drug_synergy_data/ch1_leaderBoard_monoTherapy.csv", challenge)
+    f = get.synergy.data("Drug_synergy_data/ch1_leaderBoard_monoTherapy.csv", challenge, is.train=F)
     # Create expression and mutation based features
-    f = create.features(f, challenge, is.train=F)
     f = process.features(f, challenge, is.train=F)
     testing = f
 
     # Build models using all the training data
     if(rebuild) { 
 	# Get training data
-	f.training = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge)
-	f.training = create.features(f.training, challenge, is.train=T)
+	f.training = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge, is.train=T)
 	training = f.training
 	ctrl = trainControl(method = "cv")
-	prep = c("center", "scale", "knnImpute")
+	prep = c("center", "scale")
 	# Random forest
 	rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl)
 	# Tree boost
@@ -219,6 +243,7 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     testing$syn = pred
 
     # Get confidence scores for learderboard data (assign lower confidence to values >= 10)
+    #! Consider assigning scores based on the cell senstivity (i.e. Einf)
     testing$conf = 1-abs(testing$cat)/max(abs(testing$cat))
     f$PREDICTION = testing$cat
     f$CONFIDENCE = testing$conf
@@ -234,15 +259,9 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
 
 
 explore<-function() {
-
-    # Get data
-    f = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", "ch1a")
-    #f = get.synergy.data("Drug_synergy_data/ch1_leaderBoard_monoTherapy.csv", "ch1a") # test
-    # Create expression and mutation based features
-    f = create.features(f, is.train=T)
-    # Get expression and 
-    d = get.expression.info(paste0(data.dir, "gex.csv"))
-    e = get.mutation.info(paste0(data.dir, "mutations.csv"))
+    # Get data and expression and mutation based features
+    f = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", "ch1a", is.train=T)
+    #f = get.synergy.data("Drug_synergy_data/ch1_leaderBoard_monoTherapy.csv", "ch1a", is.train=F) # test
 
     indices = which(colnames(f) %in% c("gexp_A", "gexp_B", "mut_A", "mut_B", "cat"))
     indices = c(indices, which(colnames(f) %in% c("med", "mean", "sd", "max", "min")))
@@ -262,16 +281,34 @@ explore<-function() {
     training.processed <- predict(preProcess(training, method = c("center", "scale", "knnImpute"), k=5), training.filtered) # "BoxCox"
     print(head(training.processed))
 
+    # Feature selection
+    ctrl <- rfeControl(functions=rfFuncs, method="cv", number=10)
+    # run the RFE algorithm
+    results <- rfe(training[,-which(colnames(training)=="cat")], training$cat, sizes=c(1:(ncol(training)-1)), rfeControl=ctrl)
+    print(results)
+    # list the chosen features
+    predictors(results)
+    plot(results, type=c("g", "o"))
+
+    # For categorical data
+    #ctrl <- trainControl(method="repeatedcv", number=10, repeats=3)
+    #model <- train(cat~., data=training, method="lvq", preProcess="scale", trControl=ctrl)
+    # estimate variable importance
+    #importance <- varImp(model, scale=FALSE)
+    #print(importance)
+    #plot(importance)
+
+    # Explore mutation data
+    e = get.mutation.info(paste0(data.dir, "mutations.csv"))
+    ggplot(data=e, aes(cell_line_name)) + geom_histogram(stat="bin") + coord_flip()
+
+    table(e$cell_line_name, e$mut)
+    ggplot(data=e, aes(cell_line_name)) + geom_histogram(stat="bin", group="mut") + coord_flip()
     return() 
 }
 
 
 check.synergy.consistency<-function() {
-    ggplot(data=e, aes(cell_line_name)) + geom_histogram(stat="bin") + coord_flip()
-
-    table(e$cell_line_name, e$mut)
-    ggplot(data=e, aes(cell_line_name)) + geom_histogram(stat="bin", group="mut") + coord_flip()
-
     ggplot(data=f, aes(COMPOUND_A, COMPOUND_B)) + geom_point(aes(color=factor(QA))) + theme(axis.text.x = element_text(angle=90))
     #g = f
     #g$cut = cut(g$SYNERGY_SCORE, breaks=c(1000, 50, 10, 5, -5, -10, -50, -1000))
@@ -318,6 +355,8 @@ check.synergy.consistency<-function() {
     #plot(y.2, main = paste("Normalized (q: ", format(a[1,2], digits=2), ")", sep=""))
     #dev.off()
 
+    # Get expression and mutation data
+    d = get.expression.info(paste0(data.dir, "gex.csv"))
     # Check synergy consistency in similar cell lines   
     selection.function<-function(col.values, mapping) {
 	#tapply(col.values, mapping, function(x) { x[which.max(abs(x))] })
