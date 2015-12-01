@@ -8,11 +8,12 @@ output.dir = "../doc/"
 main<-function() {
     set.seed(142341)
     #set.seed(999999)
-    challenge = "ch1a"
-    #challenge = "ch1b"
+    #challenge = "ch1a"
+    challenge = "ch1b" #!
     #explore()
     #synergy.consistency()
     mod.list = train.model(challenge)
+    return(); #!
     rfFit = mod.list$rfFit
     gbmFit = mod.list$gbmFit
     modFit = mod.list$modFit
@@ -28,9 +29,9 @@ get.synergy.data<-function(file.name, challenge, is.train) {
     #f$cut = cut(f[,"syn"], breaks=c(-10000, -100, -50, -10, 0, 10, 50, 100, 10000), labels=c("high-negative", "negative", "low-negative", "low-positive", "positive", "high-positive"))
     f$cat = f[,"SYNERGY_SCORE"]
     f = f[f$QA==1,]
-    file.name = paste0(data.dir, challenge, ".dat")
+    file.name = paste0(data.dir, challenge, ".dat") #! need to change naming for testing data
     if(file.exists(file.name)) {
-	f = read.table(f, file.name)
+	f = read.table(file.name)
     } else {
 	f = create.features(f, challenge, is.train)
 	write.table(f, file.name)
@@ -113,6 +114,23 @@ create.features<-function(f, challenge, is.train) {
 
 
 process.features<-function(f, challenge, is.train=T) {
+    # Choose features to include
+    #indices = which(colnames(f) %in% c("cat"))
+    indices = which(colnames(f) %in% c("mut_A", "mut_B", "cat"))
+    #indices = which(colnames(f) %in% c("gexp_A", "gexp_B", "mut_A", "mut_B", "cat"))
+    indices = c(indices, which(colnames(f) %in% c("med", "sd", "min")))
+    #indices = which(colnames(f) %in% c("med", "mean", "sd", "max", "min", "cat")) # only guild
+    #f = f[, c(1:8, indices)]
+    f = f[, indices]
+    # Imputing
+    f = predict(preProcess(f, method = c("knnImpute"), k=5), f) # "BoxCox"
+    return(f);
+}
+
+
+#!
+temp.process.features<-function(f, challenge, is.train=T) {
+    # Choose features to include
     indices = which(colnames(f) %in% c("gexp_A", "gexp_B", "mut_A", "mut_B", "cat"))
     indices = c(indices, which(colnames(f) %in% c("med", "sd", "min", "mean", "max")))
     #indices = which(colnames(f) %in% c("med", "mean", "sd", "max", "min", "cat")) # only guild
@@ -148,7 +166,7 @@ process.features<-function(f, challenge, is.train=T) {
     print(nzv) 
 
     # Imputing
-    f = predict(preProcess(f, method = c("center", "scale", "knnImpute"), k=5), f) # "BoxCox"
+    f = predict(preProcess(f, method = c("center", "scale", "knnImpute"), k=5), f) # "BoxCox" 
 
     # Check correlated features
     cor.mat = cor(f)
@@ -176,7 +194,7 @@ train.model<-function(challenge) {
     # Build model(s)
     # trainControl: boot for bootstrapping, cv for x-validation # repeatedcv for repeated 10-fold CV 
     ctrl = trainControl(method = "cv") #method = "repeatedcv", number = 10, repeats = 10)
-    prep = c("center", "scale") 
+    prep = NULL #"center", "scale") #! Already preprocessed above
     # Random forest
     rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl) # using default for kNN, k=5
     pred = predict(rfFit, testing)
@@ -202,6 +220,9 @@ train.model<-function(challenge) {
     a = cor(pred, testing$cat) 
     print(a)
 
+    write.table(testing$cat, paste0(output.dir, "/", "observed.dat"))
+    write.table(pred, paste0(output.dir, challenge, "/", "prediction.dat"))
+
     # Plot prediction consistency
     p = qplot(pred, cat, data=testing, main = paste0("Prediction PCC: ", format(a, digits=2)))
     png(paste0(output.dir, challenge, "/", "training.png")) 
@@ -223,9 +244,10 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     if(rebuild) { 
 	# Get training data
 	f.training = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge, is.train=T)
+	f.training = process.features(f.training, challenge, is.train=T)
 	training = f.training
 	ctrl = trainControl(method = "cv")
-	prep = c("center", "scale")
+	prep = NULL #c("center", "scale")
 	# Random forest
 	rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl)
 	# Tree boost
