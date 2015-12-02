@@ -1,19 +1,23 @@
 
-from toolbox import configuration, network_utilities, guild_utilities
+from toolbox import configuration, guild_utilities, wrappers
 from time import strftime
 import os, csv, numpy
+try:
+    from indigo import Indigo
+except:
+    print "Indigo not found, drug chemical similarity will not be available!" #!
 
 CONFIG = configuration.Configuration() 
 
 
 def main():
     # Get network
-    network = get_network()
+    network = wrappers.get_network(network_file = CONFIG.get("network_file"), only_lcc = True)
     nodes = set(network.nodes())
     #create_edge_file(network)
     # Get drug info
     drug_to_targets = get_drug_info(network_nodes=nodes)
-    print drug_to_targets.keys()
+    #print drug_to_targets.keys()
     # Check individual drugs
     #guild_drugs(drug_to_targets, nodes)
     # Check pairwise drug combinations
@@ -21,10 +25,37 @@ def main():
     # Get synergy info
     combination_to_values = get_synergy_info()
     # Get gexp info
-    gexp_norm, gene_to_idx, cell_line_to_idx = get_expression_info()
+    #! gexp_norm, gene_to_idx, cell_line_to_idx = wrappers.get_expression_info(gexp_file = CONFIG.get("gexp_file"), process=set(["z", "abs"]))
     # Check synergy between known pairs
-    check_synergy(combination_to_values, gexp_norm, gene_to_idx, cell_line_to_idx)
+    #check_synergy(combination_to_values, gexp_norm, gene_to_idx, cell_line_to_idx)
+    # Get mutation info
+    gene_to_cell_line_to_mutation = get_mutation_info(CONFIG.get("mutation_file")) 
+    print gene_to_cell_line_to_mutation.items()[:3]
+    # Get CNV info
+    gene_to_cell_line_to_cnv = get_cnv_info(CONFIG.get("cnv_file")) 
+    print gene_to_cell_line_to_cnv.items()[:3]
+    # Get pathway info
+    #pathway_to_geneids = get_pathway_info(None)
+    # Create data file
     return
+
+
+def get_pathway_info(nodes):
+    pathway_to_geneids = wrappers.get_pathway_info(pathway_file = CONFIG.get("pathway_file"), prefix = CONFIG.get("pathway_source"), nodes = nodes)
+    print len(pathway_to_geneids) 
+    #values = map(lambda x: (x[0], len(x[1])), pathway_to_geneids.items())
+    #values.sort(key=lambda x: x[1])
+    #print values[-10:]
+    genes = pathway_to_geneids["kegg_pathways_in_cancer"]
+    genes_merged = set()
+    for key, values in pathway_to_geneids.iteritems():
+	if key.find("cancer") != -1 and key != "kegg_pathways_in_cancer":
+	    print key, len(values)
+	    genes_merged |= pathway_to_geneids[key]
+	elif key.find("growth") != -1 or key.find("apoptosis") != -1:
+	    print key, len(values)
+    print len(genes), len(genes_merged), len(genes & genes_merged)
+    return pathway_to_geneids 
 
 
 def check_synergy(combination_to_values, gexp_norm, gene_to_idx, cell_line_to_idx):
@@ -114,8 +145,7 @@ def guild_combinations(drug_to_targets, nodes):
 		#if len(targets & nodes) == 0:
 		#   print "Not in network!"
 		#   continue
-		#!create_node_file(combination, targets, nodes) 
-		run_guild(combination, targets, qname="all.q") #!
+		run_guild(combination, targets, qname="all.q")
     return
 
 
@@ -125,29 +155,82 @@ def guild_drugs(drug_to_targets, nodes):
 	#if len(targets & nodes) == 0:
 	#   print "Not in network!"
 	#   continue
-	create_node_file(drug, targets, nodes)
-	run_guild(drug, targets)
+	run_guild(drug, targets, qname="all.q")
     return
 
 
+def get_mutation_info(file_name):
+    gene_to_cell_line_to_value = {}
+    f = open(file_name)
+    reader = csv.reader(f, delimiter=",", quotechar='"')
+    header = reader.next()
+    #print header
+    header_to_idx = dict((word, i) for i, word in enumerate(header))
+    #print header_to_idx
+    for row in reader:
+	gene = row[header_to_idx['Gene.name']]
+	gene = gene.split(".")[0]
+	gene = gene.split("_")[0]
+	cell_line_to_value = gene_to_cell_line_to_value.setdefault(gene, {})
+	cell_line = row[header_to_idx['cell_line_name']]
+	description = row[header_to_idx['Mutation.Description']]
+	prediction = row[header_to_idx['FATHMM.prediction']]
+	mut = None
+	if description == "Substitution - coding silent" or description == "Unknown":
+	    mut = 0
+	elif prediction =="CANCER":
+	    mut = 2
+	else:
+	    mut = 1
+	cell_line_to_value[cell_line] = mut
+    f.close()
+    return gene_to_cell_line_to_value
+
+
+def get_cnv_info(file_name):
+    gene_to_cell_line_to_value = {}
+    f = open(file_name)
+    reader = csv.reader(f, delimiter=",", quotechar='"')
+    header = reader.next()
+    print header
+    header_to_idx = dict((word, i) for i, word in enumerate(header))
+    #print header_to_idx
+    for row in reader:
+	try:
+	    ch = row[header_to_idx['chr_GRCh37']]
+	except:
+	    print row #!
+	if ch == "Y":
+	    continue
+	gene = row[header_to_idx['gene']]
+	gene = gene.split(".")[0]
+	gene = gene.split("_")[0]
+	cell_line_to_value = gene_to_cell_line_to_value.setdefault(gene, {})
+	cell_line = row[header_to_idx['cell_line_name']]
+	cnv_min = int(row[header_to_idx['min_cn_GRCh37']])
+	cnv_max = int(row[header_to_idx['max_cn_GRCh37']])
+	cnv = (cnv_min + cnv_max) / 2.0
+	cell_line_to_value[cell_line] = cnv
+    f.close()
+    return gene_to_cell_line_to_value
+
+
 def get_drug_info(network_nodes=None):
-    #drug = "test"
-    #targets = set(["AKT1"])
-    #drug_to_targets = {drug: targets}
     drug_file = CONFIG.get("drug_file")
-    drug_to_targets = {}
+    drug_to_values = {}
     f = open(drug_file)
     reader = csv.reader(f, delimiter=',', quotechar='"')
     for row in reader:
 	drug = row[0]
 	targets = set(row[1].split(","))
+	formula = row[2]
 	if network_nodes is not None:
 	    if len(targets & network_nodes) == 0:
 		continue
-	drug_to_targets[drug] = targets
+	drug_to_values[drug] = (targets, formula)
 	#print drug, targets
     f.close()
-    return drug_to_targets
+    return drug_to_values
 
 
 def get_synergy_info():
@@ -171,33 +254,6 @@ def get_synergy_info():
 	cell_line_to_values[cell_line] = (max_a, max_b, synergy)
     f.close()
     return combination_to_values 
-
-
-def get_expression_info():
-    gexp_file = CONFIG.get("gexp_file")
-    #gene_to_values = {}
-    f = open(gexp_file)
-    reader = csv.reader(f, delimiter=',', quotechar='"')
-    header = reader.next()
-    #print len(header), header
-    header = header[1:]
-    cell_line_to_idx = dict([ (cell_line, i) for i, cell_line in enumerate(header) ])
-    gene_to_idx = {}
-    values_arr = []
-    for i, row in enumerate(reader):
-	gene = row[0]
-	values = map(float, row[1:])
-	#gene_to_values[gene] = values
-	gene_to_idx[gene] = i
-	values_arr.append(values)
-    f.close()
-    gexp = numpy.array(values_arr)
-    gexp_norm = (gexp - gexp.mean(axis=1)[:, numpy.newaxis]) / gexp.std(axis=1)[:, numpy.newaxis]
-    gexp_norm = numpy.abs(gexp_norm)
-    #print gexp.shape, gexp_norm.shape
-    #print gexp[0,0], gexp_norm[0,0]
-    #return gene_to_values, cell_line_to_idx
-    return gexp_norm, gene_to_idx, cell_line_to_idx
 
 
 def create_edge_file(network):
@@ -224,6 +280,8 @@ def create_node_file(drug, targets, nodes):
 
 
 def run_guild(drug, targets, qname=None):
+    # Create node file
+    create_node_file(drug, targets, nodes)
     # Get parameters
     executable_path = CONFIG.get("guild_path") 
     output_dir = CONFIG.get("output_dir") + "/"
@@ -243,15 +301,26 @@ def run_guild(drug, targets, qname=None):
     return
 
 
-def get_network(only_lcc=True):
-    network_file = CONFIG.get("network_file") 
-    network = network_utilities.create_network_from_sif_file(network_file, use_edge_data = False, delim = None, include_unconnected=True)
-    #print len(network.nodes()), len(network.edges())
-    if only_lcc:
-	components = network_utilities.get_connected_components(network, False)
-	network = network_utilities.get_subgraph(network, components[0])
-	#print len(network.nodes()), len(network.edges())
-    return network
+def get_drug_similarity(drug_to_values, drug1, drug2, method):
+    targets1, smiles1 = group_to_values[drug1]
+    targets2, smiles2 = group_to_values[drug2]
+    targets_common = targets1 & targets2
+    d = None
+    if method == "target":
+	d = len(targets_common) / float(len(targets1|targets2)) # float(min(len(targets1), len(targets2)))
+    elif method == "chemical":
+	indigo = Indigo()
+	m = indigo.loadMolecule(smiles1) 
+	m.aromatize()
+	fp = m.fingerprint("sim") # sub
+	m2 = indigo.loadMolecule(smiles2) 
+	m2.aromatize() # Aromatize molecules in case they are not in aromatic form
+	fp2 = m2.fingerprint("sim") # Calculate similarity between "similarity" fingerprints
+	d = indigo.similarity(fp, fp2, "tanimoto") # tversky
+	#print group, group2, "Tanimoto: %s" % (d) 
+    else:
+	raise ValueError("Uknown method: %s" % method)
+    return d
 
 
 if __name__ == "__main__":
