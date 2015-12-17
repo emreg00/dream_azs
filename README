@@ -15,9 +15,12 @@ TODO:
 + remove insensitive (high viability at max kill) / highly varying (sd of synergy) cell lines 
 + feature selection (remove correlated)
 + handling missing values (either dont use them or imppute them, eg., kNN=5)
-- using drug similarity (target or formula) as feature
-- using pathway & cosmic genes as features
-- use all training data set
++ using drug similarity (target or formula) as feature
++ using pathway & cosmic genes as features
++ imputation w/o synergy
++ use all training data set
 ? using disease similarity (gexp correlation) as feature
 ?correction for cell / drug drift (overall high / low)
+- cell line based drifts for confidence scoring (e.g., penalize insensitive / high Einf cell lines)
+- using 0/1 scheme for ch2
 
