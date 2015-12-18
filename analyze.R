@@ -7,14 +7,16 @@ output.dir = "../doc/"
 
 main<-function() {
     set.seed(142341)
+    #set.seed(555444)
     #set.seed(999999)
-    challenge = "ch1a"
-    #challenge = "ch1b"
+    #challenge = "ch1a"
+    challenge = "ch1b"
     #challenge = "ch2"
     rfFit = NULL
     gbmFit = NULL
     modFit = NULL
     mod.list = train.model(challenge)
+    return() #!
     rfFit = mod.list$rfFit
     gbmFit = mod.list$gbmFit
     modFit = mod.list$modFit
@@ -70,15 +72,11 @@ process.features<-function(f, challenge, is.train=T) {
     }
 
     # Choose features to include
-    ##features = c("gexpA", "gexpB", "mutA", "mutB", "cnvA", "cnvB", "sim", "guild.med", "guild.max", "kegg.gexpA", "kegg.gexpB", "kegg.mutA", "kegg.mutB", "kegg.cnvA", "kegg.cnvB", "cosmic.gexpA", "cosmic.gexpB", "cosmic.mutA", "cosmic.mutB", "cosmic.cnvA", "cosmic.cnvB")
-    #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.gex.med", "kegg.gex.max", "kegg.cnv.med", "kegg.cnv.max", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.cnv.med", "cosmic.cnv.max", "kegg.in", "cosmic.in") # 41.9 / (in) 39.9
-    #features = c("gexp", "mut", "guild.med", "guild.max", "kegg.gexp.med", "kegg.gexp.max", "cosmic.gexp.med", "cosmic.gexp.max")
-    #features = c("gexp", "kegg.gexp.med", "kegg.gexp.max", "cosmic.gexp.med", "cosmic.gexp.max")
-    features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.in", "cosmic.in") # 41.3 / (in) 44.9
+    #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.gex.med", "kegg.gex.max", "kegg.cnv.med", "kegg.cnv.max", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.cnv.med", "cosmic.cnv.max", "kegg.in", "cosmic.in") # (no in) 41.9 / (in) 39.9
+    #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.in", "cosmic.in") # (no in) 41.3 / (in) 44.9
+    features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.in", "cosmic.in") 
     #features = c("mut", "cnv", "kegg.mut", "kegg.cnv") 67.3 (61 without kegg, 51.8 w/o cnv, 12 w/o mut, cosmic also lowers)
     #features = c("mut", "cnv", "gexp", "kegg.cnv") # 69.9 (20), 71.2 (30) 76.8 (40) w/ sensitivity filtering below, 74.4 w/o removing kegg.mut (correlated)
-    #features = c("cnvA", "cnvB", "kegg.gexpA", "kegg.gexpB") # mutation data is not available for most cell lines
-    #features = c("gexp", "kegg.mut", "kegg.cnv", "cnv") # mut probably not used
     #features = c("gexp", "cnv") # 28.5 w/ refined feature # ch2 selection
     indices = which(colnames(f) %in% c(features, "cat"))
 
@@ -133,8 +131,6 @@ process.features<-function(f, challenge, is.train=T) {
     }
     #print(summary(f))
 
-    #! Categorize synergy as 0/1 for challenge 2
-
     # Check correlated features
     cor.mat = cor(f)
     cor.idx = findCorrelation(cor.mat, cutoff = .75)
@@ -142,7 +138,12 @@ process.features<-function(f, challenge, is.train=T) {
     if(length(cor.idx) > 0) {
     	f = f[,-cor.idx]
     }
-    
+
+    # Categorize synergy as 0/1 for challenge 2
+    if(challenge == "ch2") {
+	f$cat = factor(ifelse(f$cat > 30, 1, 0))
+	#! need to balence the data (0: 80%, 1: 20%)
+    }
     # Models have their built-in feature selection
     # Feature selection for classification tasks
     #model <- train(cat~., data=f, method="lvq", preProcess=NULL, trControl=trainControl(method = "cv"))
@@ -165,8 +166,9 @@ train.model<-function(challenge) {
 
     # Build model(s)
     # trainControl: boot for bootstrapping, cv for x-validation # repeatedcv for repeated 10-fold CV 
-    ctrl = trainControl(method = "cv") #method = "repeatedcv", number = 10, repeats = 10)
-    prep = NULL #"center", "scale") # Already preprocessed above
+    ctrl = trainControl(method = "cv") 
+    #ctrl = trainControl(method = "repeatedcv", number = 10, repeats = 3)
+    prep = NULL # c("center", "scale") # Already preprocessed above
     # Random forest
     rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl) # using default for kNN, k=5
     # List the chosen features
@@ -175,13 +177,21 @@ train.model<-function(challenge) {
     # Without imputation it is possible that some are not predicted due to NA
     #d = extractPrediction(rfFit, testing)
     #print(head(d))
-    a = cor(pred, testing$cat) 
+    if(challenge == "ch2") { 
+	a = confusionMatrix(pred, testing$cat)
+    } else {
+	a = cor(pred, testing$cat) 
+    }
     print(a)
     # Tree boost
     gbmFit = train(cat ~ ., data=training, method = "gbm", preProcess = prep, trControl = ctrl, verbose=F)
     print(predictors(gbmFit))
     pred = predict(gbmFit, testing)
-    a = cor(pred, testing$cat) 
+    if(challenge == "ch2") { 
+	a = confusionMatrix(pred, testing$cat)
+    } else {
+	a = cor(pred, testing$cat) 
+    }
     print(a)
     # Ridge (regression L2 regularization)
     #ridgeFit = train(cat ~ ., data=training, method = "ridge", preProcess = prep, trControl = ctrl)
@@ -195,7 +205,11 @@ train.model<-function(challenge) {
     pred.comb = data.frame(pred.1, pred.2, cat=testing$cat)
     modFit = train(cat ~ ., data=pred.comb, method = "gam")
     pred = predict(modFit, testing)
-    a = cor(pred, testing$cat) 
+    if(challenge == "ch2") { 
+	a = confusionMatrix(pred, testing$cat)
+    } else {
+	a = cor(pred, testing$cat) 
+    }
     print(a)
 
     write.table(testing$cat, paste0(output.dir, "/", "observed.dat"))
@@ -253,11 +267,16 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
 
     # Get confidence scores for learderboard data (assign lower confidence to values >= 10)
     #! Consider assigning scores based on the cell senstivity (i.e. Einf)
-    testing$conf = 1-abs(testing$cat)/max(abs(testing$cat))
+    if(challenge == "ch2") { 
+	# Not very meaningful, prediction 0/1
+	testing$conf = 1-as.numeric(testing$cat)/max(as.numeric(testing$cat))
+    } else {
+	testing$conf = 1-abs(testing$cat)/max(abs(testing$cat))
+    }
 
     # Output predictions
     if(challenge == "ch2") {
-	f$cat = ifelse(testing$cat > 10, 1, 0)
+	f$cat = testing$cat #ifelse(testing$cat > 10, 1, 0)
 	f$conf = testing$conf
 	library(reshape2)
 	d = acast(f, comb.id~cell.line, value.var="cat")
