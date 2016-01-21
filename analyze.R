@@ -74,7 +74,9 @@ process.features<-function(f, challenge, is.train=T) {
     # Choose features to include
     #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.gex.med", "kegg.gex.max", "kegg.cnv.med", "kegg.cnv.max", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.cnv.med", "cosmic.cnv.max", "kegg.in", "cosmic.in") # (no in) 41.9 / (in) 39.9
     #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.in", "cosmic.in") # (no in) 41.3 / (in) 44.9
-    features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.in", "cosmic.in") 
+    #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.in", "cosmic.in") 
+    features = c("gexp", "mut") #!
+    features = c(features, colnames(e)[3:(which(colnames(e) == "gexpA")-1)]) #!
     #features = c("mut", "cnv", "kegg.mut", "kegg.cnv") 67.3 (61 without kegg, 51.8 w/o cnv, 12 w/o mut, cosmic also lowers)
     #features = c("mut", "cnv", "gexp", "kegg.cnv") # 69.9 (20), 71.2 (30) 76.8 (40) w/ sensitivity filtering below, 74.4 w/o removing kegg.mut (correlated)
     #features = c("gexp", "cnv") # 28.5 w/ refined feature # ch2 selection
@@ -92,7 +94,7 @@ process.features<-function(f, challenge, is.train=T) {
 	f = f[!f$CELL_LINE %in% cell.lines,] 
 	# Cells with high min Einf has lower synergy
 	b = cor.test(a$syn.med, a$einf.min, use="complete")
-	print(sprintf("Correlation between einf.min and syn.med: %f %f", b$estimate[[1]], b$p.value)) # -0.235
+	print(sprintf("Cor b/w einf.min and syn.med: %f %f", b$estimate[[1]], b$p.value)) # -0.235
     }
 
     # Use all features
@@ -108,7 +110,12 @@ process.features<-function(f, challenge, is.train=T) {
     # Check variance 
     nzv = nearZeroVar(f, saveMetrics= TRUE)
     print(nzv) 
-
+    #print(rownames(nzv[nzv$zeroVar,])) 
+    zv.idx = which(colnames(f) %in% rownames(nzv[nzv$zeroVar,]))
+    print(sprintf("Zero variance variables: %s", paste(colnames(f[, zv.idx]), collapase=", "))) 
+    if (nrow(nzv) > 0) {
+	f = f[, -zv.idx]
+    }
     print(summary(f))
 
     # Imputing and scaling
@@ -134,7 +141,7 @@ process.features<-function(f, challenge, is.train=T) {
     # Check correlated features
     cor.mat = cor(f)
     cor.idx = findCorrelation(cor.mat, cutoff = .75)
-    print(c("Correlated:", colnames(f)[cor.idx]))
+    print(sprintf("Correlated: %s", paste(colnames(f)[cor.idx], collapase=", "))) 
     if(length(cor.idx) > 0) {
     	f = f[,-cor.idx]
     }
@@ -269,13 +276,14 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     #! Consider assigning scores based on the cell senstivity (i.e. Einf)
     if(challenge == "ch2") { 
 	# Not very meaningful, prediction 0/1
-	testing$conf = 1-as.numeric(testing$cat)/max(as.numeric(testing$cat))
+	testing$conf = 1-as.numeric(testing$cat)/max(as.numeric(testing$cat)) #! check this
     } else {
 	testing$conf = 1-abs(testing$cat)/max(abs(testing$cat))
     }
 
     # Output predictions
     if(challenge == "ch2") {
+	#! check why output is 1s and 2s
 	f$cat = testing$cat #ifelse(testing$cat > 10, 1, 0)
 	f$conf = testing$conf
 	library(reshape2)
