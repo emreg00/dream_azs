@@ -8,6 +8,7 @@ initialize<-function() {
     file.name = "Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv"
     parameters$synergy.file = paste0(parameters$data.dir, file.name)
     parameters$results.file = paste0(parameters$output.dir, "results.dat")
+    parameters$leaderboard.file = paste0(parameters$output.dir, "leaderboard.dat")
     return(parameters);
 }
 
@@ -55,9 +56,12 @@ filter<-function(f, cutoff) {
 }
 
 
-results<-function(parameters) {
-    d = read.csv(parameters$results.file, sep="\t", header=T)
-    d
+results<-function(parameters, leaderboard=F) {
+    if(leaderboard) {
+	read.csv(parameters$leaderboard.file, sep="\t", header=T)
+    } else {
+	read.csv(parameters$results.file, sep="\t", header=T)
+    }
 }
 
 

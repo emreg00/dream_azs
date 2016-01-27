@@ -79,8 +79,8 @@ process.features<-function(f, challenge, is.train=T) {
     #features = c(features, colnames(e)[3:(which(colnames(e) == "gexpA")-1)]) 
     #!
     features = c()
-    indices = which(grepl("^\\.[gmczp]", colnames(e))) #!
-    features = colnames(e)[indices] #!
+    indices = which(grepl("^\\.[gcz]", colnames(e)))
+    features = colnames(e)[indices]
     features = c("guild.common", "guild.med", "guild.max", features)
     features = c("gexp", "mut", "cnv", "sim.target", "sim.chemical", "kegg.in", "cosmic.in", features)
     #features = c("mut", "cnv", "kegg.mut", "kegg.cnv") 67.3 (61 without kegg, 51.8 w/o cnv, 12 w/o mut, cosmic also lowers)
@@ -299,7 +299,7 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     # Get confidence scores for learderboard data (assign lower confidence to larger values)
     #! Consider assigning scores based on the cell line senstivity (i.e. Einf) or performance on training set
     if(challenge == "ch2") { 
-	#! Not very meaningful, prediction 0/1 # check whether there is 0 div error
+	# Not very meaningful, prediction 0/1 # check whether there is 0 div error
 	testing$conf = 1-as.numeric(testing$cat)/max(as.numeric(testing$cat))
     } else {
 	testing$conf = 1-abs(testing$cat)/max(abs(testing$cat))
