@@ -18,17 +18,22 @@ TODO:
 + using drug similarity (target or formula) as feature
 + using pathway & cosmic genes as features
 + imputation w/o synergy
-+ use all training data set
++ use all training data set (better)
 ? using disease similarity (gexp correlation) as feature
 ?correction for cell / drug drift (overall high / low)
 - cell line based drifts for confidence scoring (e.g., penalize 
 insensitive / high Einf cell lines)
 - using 0/1 scheme for ch2
-- shifting to categorized features (muts at pathway genes A B C: 0 1 1)
-- novel features from ncomm paper
-- GUILD scoring for drugs (targets) for each cell line using gexp as 
++ shifting to categorized features (muts at pathway genes A B C: 0 1 1)
+o GUILD scoring for drugs (targets) for each cell line using gexp as 
 seed score, overlap at 1-5% / coverage of KEGG pathways (or n.comm pathways) at top
-- ppi distance between targets
-- degree of targets
+? features from ncomm paper, not cell line specific (ppi distance between targets / degree of targets)
 
 => gexp target categorized 35.6 (from 22 of non-categorized)
+=> + mut target categorized 38.2 (from 35.6 of gexp)
+=> gexp categorized only 35.4 (forget about mXXX, "gexp", "mut")
+=> cnv only "c" 41.6
+=> cnv both "c" and "z" 38.3
+=> g/c/p 35 - 36.3 (including correlated)
+=> g/c 36.6
+=> c/p 41.6

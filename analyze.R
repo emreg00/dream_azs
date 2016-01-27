@@ -20,7 +20,7 @@ main<-function() {
     rfFit = mod.list$rfFit
     gbmFit = mod.list$gbmFit
     modFit = mod.list$modFit
-    get.predictions(challenge, rfFit, gbmFit, modFit, rebuild=T)
+    get.predictions(challenge, rfFit, gbmFit, modFit, rebuild=F) #rebuild=T
 }
 
 
@@ -75,12 +75,20 @@ process.features<-function(f, challenge, is.train=T) {
     #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.gex.med", "kegg.gex.max", "kegg.cnv.med", "kegg.cnv.max", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.cnv.med", "cosmic.cnv.max", "kegg.in", "cosmic.in") # (no in) 41.9 / (in) 39.9
     #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.in", "cosmic.in") # (no in) 41.3 / (in) 44.9
     #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.in", "cosmic.in") 
-    features = c("gexp", "mut") #!
-    features = c(features, colnames(e)[3:(which(colnames(e) == "gexpA")-1)]) #!
+    #features = c("gexp", "mut") 
+    #features = c(features, colnames(e)[3:(which(colnames(e) == "gexpA")-1)]) 
+    #!
+    features = c()
+    indices = which(grepl("^\\.[gmczp]", colnames(e))) #!
+    features = colnames(e)[indices] #!
+    features = c("guild.common", "guild.med", "guild.max", features)
+    features = c("gexp", "mut", "cnv", "sim.target", "sim.chemical", "kegg.in", "cosmic.in", features)
     #features = c("mut", "cnv", "kegg.mut", "kegg.cnv") 67.3 (61 without kegg, 51.8 w/o cnv, 12 w/o mut, cosmic also lowers)
-    #features = c("mut", "cnv", "gexp", "kegg.cnv") # 69.9 (20), 71.2 (30) 76.8 (40) w/ sensitivity filtering below, 74.4 w/o removing kegg.mut (correlated)
+    #features = c("mut", "cnv", "gexp", features) # 69.9 (20), 71.2 (30) 76.8 (40) w/ sensitivity filtering below, 74.4 w/o removing kegg.mut (correlated)
     #features = c("gexp", "cnv") # 28.5 w/ refined feature # ch2 selection
-    indices = which(colnames(f) %in% c(features, "cat"))
+    indices = which(colnames(f) %in% c(features)) # , "cat"
+
+    print(sprintf("Features: %s", paste(features, collapse=", ")))
 
     # Remove insensitive cell lines (Einf)
     if(is.train) {
@@ -97,6 +105,8 @@ process.features<-function(f, challenge, is.train=T) {
 	print(sprintf("Cor b/w einf.min and syn.med: %f %f", b$estimate[[1]], b$p.value)) # -0.235
     }
 
+    # Keep a copy to assign cat values afterwards
+    f.org = f
     # Use all features
     if(challenge == "ch1a") {
 	f = f[, c(4:11, indices)]
@@ -107,49 +117,63 @@ process.features<-function(f, challenge, is.train=T) {
 	stop("Unrecognized challenge!")
     }
 
-    # Check variance 
-    nzv = nearZeroVar(f, saveMetrics= TRUE)
-    print(nzv) 
-    #print(rownames(nzv[nzv$zeroVar,])) 
-    zv.idx = which(colnames(f) %in% rownames(nzv[nzv$zeroVar,]))
-    print(sprintf("Zero variance variables: %s", paste(colnames(f[, zv.idx]), collapase=", "))) 
-    if (nrow(nzv) > 0) {
-	f = f[, -zv.idx]
+    if(is.train == T) {
+	# Check variance 
+	nzv = nearZeroVar(f, saveMetrics= TRUE)
+	print(nzv) 
+	#print(rownames(nzv[nzv$zeroVar,])) 
+	zv.idx = which(colnames(f) %in% rownames(nzv[nzv$zeroVar,]))
+	print(sprintf("Zero variance variables: %s", paste(colnames(f)[zv.idx], collapse=", "))) 
+	if (length(zv.idx) > 0) {
+	    f = f[, -zv.idx]
+	}
+	#print(summary(f))
     }
-    print(summary(f))
+
 
     # Imputing and scaling
     #f = predict(preProcess(f, method = c("center", "scale")), f) # no imputation
-    if(challenge == "ch1a" & is.train==T) {
+    #if(challenge == "ch1a" & is.train==T) {
 	# Impute using category (synergy) information
 	#f = predict(preProcess(f, method = c("center", "scale", "knnImpute"), k=5), f) # scales synergy as well
-	idx = which(colnames(f) == "cat")
-	d = f[,-idx]
-	d = predict(preProcess(d, method = c("center", "scale")), d) 
-	d$cat = f$cat
-	d = predict(preProcess(d, method = c("knnImpute"), k=5), d) 
-	f = d
-    } else {
-	idx = which(colnames(f) == "cat")
-	d = f[,-idx]
-	d = predict(preProcess(d, method = c("center", "scale", "knnImpute"), k=5), d) # "BoxCox" 
-	d$cat = f$cat #as.vector(scale(f$cat))
-	f = d
-    }
-    #print(summary(f))
+	#idx = which(colnames(f) == "cat")
+	#d = f[,-idx]
+	#d = f
+	#d = predict(preProcess(d, method = c("center", "scale")), d) 
+	#d$cat = f$cat
+	#d = predict(preProcess(d, method = c("knnImpute"), k=5), d) 
+	#f = d
+    #} else {
+	#idx = which(colnames(f) == "cat")
+	#d = f[,-idx]
+	#d = predict(preProcess(d, method = c("center", "scale", "knnImpute"), k=5), d) # "BoxCox" 
+	#d$cat = f$cat #as.vector(scale(f$cat))
+	#f = d
+    #}
+    f = predict(preProcess(f, method = c("center", "scale", "knnImpute"), k=5), f) # "BoxCox" 
 
-    # Check correlated features
-    cor.mat = cor(f)
-    cor.idx = findCorrelation(cor.mat, cutoff = .75)
-    print(sprintf("Correlated: %s", paste(colnames(f)[cor.idx], collapase=", "))) 
-    if(length(cor.idx) > 0) {
-    	f = f[,-cor.idx]
+    if(is.train == T) {
+	# Check correlated features
+	cor.mat = cor(f)
+	cor.idx = findCorrelation(cor.mat, cutoff = .75)
+	print(sprintf("Correlated: %s", paste(colnames(f)[cor.idx], collapse=", "))) 
+	if(length(cor.idx) > 0) {
+	    f = f[,-cor.idx]
+	}
     }
+
+    f$cat = f.org$cat
+    print(summary(f))
 
     # Categorize synergy as 0/1 for challenge 2
-    if(challenge == "ch2") {
+    if(challenge == "ch2" & is.train == T) {
 	f$cat = factor(ifelse(f$cat > 30, 1, 0))
-	#! need to balence the data (0: 80%, 1: 20%)
+	# Balance the data (0: 80%, 1: 20%) #!
+	indices.positive = which(f$cat == 1)
+	indices = which(f$cat == 0)
+	indices = sample(indices, length(indices.positive))
+	indices = c(indices.positive, indices)
+	f = f[indices,]
     }
     # Models have their built-in feature selection
     # Feature selection for classification tasks
@@ -272,11 +296,11 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     # Get predictions for leaderboard data
     testing$cat = pred
 
-    # Get confidence scores for learderboard data (assign lower confidence to values >= 10)
-    #! Consider assigning scores based on the cell senstivity (i.e. Einf)
+    # Get confidence scores for learderboard data (assign lower confidence to larger values)
+    #! Consider assigning scores based on the cell line senstivity (i.e. Einf) or performance on training set
     if(challenge == "ch2") { 
-	# Not very meaningful, prediction 0/1
-	testing$conf = 1-as.numeric(testing$cat)/max(as.numeric(testing$cat)) #! check this
+	#! Not very meaningful, prediction 0/1 # check whether there is 0 div error
+	testing$conf = 1-as.numeric(testing$cat)/max(as.numeric(testing$cat))
     } else {
 	testing$conf = 1-abs(testing$cat)/max(abs(testing$cat))
     }
@@ -284,7 +308,7 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     # Output predictions
     if(challenge == "ch2") {
 	#! check why output is 1s and 2s
-	f$cat = testing$cat #ifelse(testing$cat > 10, 1, 0)
+	f$cat = as.numeric(testing$cat) #ifelse(testing$cat > 10, 1, 0)
 	f$conf = testing$conf
 	library(reshape2)
 	d = acast(f, comb.id~cell.line, value.var="cat")

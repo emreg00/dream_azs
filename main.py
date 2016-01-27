@@ -31,7 +31,7 @@ def create_feature_file():
     # Get gexp info
     gexp_norm, gene_to_idx, cell_line_to_idx = wrappers.get_expression_info(gexp_file = CONFIG.get("gexp_file"), process=set(["z", "abs"]), dump_file = CONFIG.get("gexp_dump"))
     values = [gene_to_idx["TSPAN6"], gene_to_idx["TNMD"]] 
-    print gexp_norm[values, cell_line_to_idx["647-V"]]
+    #print gexp_norm[values, cell_line_to_idx["647-V"]]
     print "TNMD @ 647-V", gexp_norm[gene_to_idx["TNMD"], cell_line_to_idx["647-V"]] 
     # Get mutation info
     gene_to_cell_line_to_mutation = get_mutation_info() 
@@ -39,17 +39,21 @@ def create_feature_file():
     # Get CNV info
     #gene_to_cell_line_to_cnv = {}
     gene_to_cell_line_to_cnv = get_cnv_info(CONFIG.get("cnv_file")) 
-    print gene_to_cell_line_to_cnv.items()[:3]
-    # Get GUILD info
-    #combination_to_guild_values = {}
-    combination_to_guild_values = get_guild_based_synergy_scores(drug_to_values.keys(), None, None, None)
-    print combination_to_guild_values.items()[:3]
+    print gene_to_cell_line_to_cnv.items()[:2]
     # Get cancer gene & pathway info
     pathway_to_genes = get_pathway_info(nodes=None)
     print pathway_to_genes.keys()
+    genes_pathway = set()
+    for genes in (pathway_to_genes["kegg"], pathway_to_genes["census"]):
+	genes_pathway |= genes
+    genes_pathway = list(genes_pathway)
+    # Get GUILD info
+    #combination_to_guild_values = {}
+    combination_to_guild_values = get_guild_based_synergy_scores(drug_to_values.keys(), genes_pathway, gexp_norm, gene_to_idx, cell_line_to_idx)
+    print combination_to_guild_values.items()[:2]
     # Get drug similarity info
     combination_to_similarity = get_drug_similarity(drug_to_values)
-    print combination_to_similarity.items()[:10]
+    print combination_to_similarity.items()[:5]
     #values = combination_to_similarity.items()
     #values.sort(key=lambda x: x[1])
     #print values[-20:]
@@ -63,9 +67,10 @@ def create_feature_file():
     else:
 	raise ValueError("Uknown task: " + task)
     f = open(out_file, 'w')
-    features = ["gexpA", "gexpB", "mutA", "mutB", "cnvA", "cnvB", "sim.target", "sim.chemical", "guild.med", "guild.max", "kegg.in", "kegg.gexp.med", "kegg.gexp.max", "kegg.mut.med", "kegg.mut.max", "kegg.cnv.med", "kegg.cnv.max", "kegg.cnvA", "kegg.cnvB", "cosmic.in", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.mut.med", "cosmic.mut.max", "cosmic.cnv.med", "cosmic.cnv.max", "cosmic.cnvA", "cosmic.cnvB"]
+    features = ["gexpA", "gexpB", "mutA", "mutB", "cnvA", "cnvB", "sim.target", "sim.chemical", "guild.common", "guild.med", "guild.max", "kegg.in", "kegg.gexp.med", "kegg.gexp.max", "kegg.mut.med", "kegg.mut.max", "kegg.cnv.med", "kegg.cnv.max", "kegg.cnvA", "kegg.cnvB", "cosmic.in", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.mut.med", "cosmic.mut.max", "cosmic.cnv.med", "cosmic.cnv.max", "cosmic.cnvA", "cosmic.cnvB"]
     drugs = drug_to_values.keys()
     seen_combinations = set()
+    # Get all targets
     targets_all = set()
     for i, drug1 in enumerate(drugs):
 	for j, drug2 in enumerate(drugs):
@@ -76,7 +81,14 @@ def create_feature_file():
 	    targets_all |= targets1 | targets2
     targets_all = list(targets_all)
     target_to_idx = dict((target, i) for i, target in enumerate(targets_all))
-    features = targets_all + features
+    # Get all pathway genes
+    targets_pathway = set()
+    for genes in (pathway_to_genes["kegg"], pathway_to_genes["census"]):
+	targets_pathway |= genes
+    targets_pathway = list(targets_pathway & set(targets_all))
+    pathway_target_to_idx = dict((gene, i) for i, gene in enumerate(targets_pathway))
+    # Create header
+    features = map(lambda x: ".g" + x, targets_all) + map(lambda x: ".m" + x, targets_all) + map(lambda x: ".c" + x, targets_all) + map(lambda x: ".z" + x, targets_all) + map(lambda x: ".p" + x, targets_pathway) + features
     f.write("comb.id cell.line %s\n" % " ".join(features))
     for i, drug1 in enumerate(drugs):
 	for j, drug2 in enumerate(drugs):
@@ -97,7 +109,7 @@ def create_feature_file():
 		if task != "ch2-test":
 		    if cell_line not in cell_line_to_mono_values:
 			continue
-		print comb_id, cell_line, drug1, drug2
+		#print comb_id, cell_line, drug1, drug2
 		seen_combinations.add((comb_id, cell_line))
 		feature_values = []
 		# GEXP categorized
@@ -108,6 +120,39 @@ def create_feature_file():
 			    if target in gene_to_idx:
 				values[target_to_idx[target]] += gexp_norm[gene_to_idx[target], cell_line_to_idx[cell_line]]
 		feature_values.extend(values)
+		#print len(feature_values) 
+		# MUT categorized
+		values = [ 0 ] * len(targets_all)
+		for targets in (targets1, targets2):
+		    for target in targets:
+			if target in gene_to_cell_line_to_mutation:
+			    d = gene_to_cell_line_to_mutation[target]
+			    if cell_line in d: 
+				values[target_to_idx[target]] += d[cell_line]
+		feature_values.extend(values)
+		#print len(feature_values)
+		# CNV categorized
+		values = [ 0 ] * len(targets_all)
+		values2 = [ 0 ] * len(targets_all)
+		for targets in (targets1, targets2):
+		    for target in targets:
+			if target in gene_to_cell_line_to_cnv:
+			    d = gene_to_cell_line_to_cnv[target] 
+			    if cell_line in d: 
+				# d contains cnv value and zygosity
+				values[target_to_idx[target]] += d[cell_line][0]
+				values2[target_to_idx[target]] += d[cell_line][1]
+		feature_values.extend(values) 
+		feature_values.extend(values2) 
+		#print len(feature_values)
+		# KEGG / COSMIC INVOLVEMENT categorized
+		values = [ 0 ] * len(targets_pathway)
+		for targets in (targets1, targets2):
+		    for target in targets:
+			if target in pathway_target_to_idx:
+			    values[pathway_target_to_idx[target]] += 1
+		feature_values.extend(values) 
+		#print len(feature_values) 
 		# GEXP
 		for targets in (targets1, targets2):
 		    indices = []
@@ -119,6 +164,7 @@ def create_feature_file():
 		    else:
 			val = numpy.median(gexp_norm[indices, cell_line_to_idx[cell_line]])
 		    feature_values.append(val)
+		    #print len(feature_values)
 		# MUT
 		for targets in (targets1, targets2):
 		    values = []
@@ -132,6 +178,7 @@ def create_feature_file():
 		    else:
 			val = numpy.max(values)
 		    feature_values.append(val)
+		    #print len(feature_values) 
 		# CNV
 		for targets in (targets1, targets2):
 		    values = []
@@ -139,29 +186,27 @@ def create_feature_file():
 			if target in gene_to_cell_line_to_cnv:
 			    d = gene_to_cell_line_to_cnv[target]
 			    if cell_line in d: 
-				values.append(d[cell_line])
+				values.append(d[cell_line][0])
 		    if len(values) == 0:
 			val = "NA"
 		    else:
 			val = numpy.max(values)
 		    feature_values.append(val)
+		    #print len(feature_values)
 		# SIMILARITY
+		vals = ["NA"] * 2
 		if comb_id in combination_to_similarity:
 		    vals = combination_to_similarity[comb_id]
-		else:
-		    vals = ["NA"] * 2
 		feature_values.extend(vals)
+		#print len(feature_values) 
 		# GUILD
-		if comb_id not in combination_to_guild_values:
-		    vals = ["NA"] * 2
-		else:
+		vals = ["NA"] * 3
+		if comb_id in combination_to_guild_values:
 		    values_guild = combination_to_guild_values[comb_id]
-		    #vals = [ numpy.median(values_guild), numpy.max(values_guild) ]
-		    if cell_line not in values_guild:
-			vals = ["NA"] * 2
-		    else:
-			vals = [ numpy.median(values_guild[cell_line]), numpy.max(values_guild[cell_line]) ]
+		    if cell_line in values_guild:
+			vals = values_guild[cell_line]
 		feature_values.extend(vals)
+		#print len(feature_values)
 		# KEGG / COSMIC
 		for genes in (pathway_to_genes["kegg"], pathway_to_genes["census"]):
 		    # INVOLVEMENT
@@ -169,6 +214,7 @@ def create_feature_file():
 		    for targets in (targets1, targets2):
 			val += int(len(targets & genes) > 0) 
 		    feature_values.append(val)
+		    #print len(feature_values) 
 		    # GEXP
 		    for target in genes:
 			if target in gene_to_idx:
@@ -177,8 +223,9 @@ def create_feature_file():
 			vals = ["NA"] * 2
 		    else:
 			values = gexp_norm[indices, cell_line_to_idx[cell_line]]
-			val = [ numpy.median(values), numpy.max(values) ]
+			vals = [ numpy.median(values), numpy.max(values) ]
 		    feature_values.extend(vals)
+		    #print len(feature_values) 
 		    # MUT
 		    values = []
 		    for target in genes:
@@ -191,18 +238,20 @@ def create_feature_file():
 		    else:
 			vals = [ numpy.median(values), numpy.max(values) ]
 		    feature_values.extend(vals)
+		    #print len(feature_values) 
 		    # CNV
 		    values = []
 		    for target in genes:
 			if target in gene_to_cell_line_to_cnv:
 			    d = gene_to_cell_line_to_cnv[target]
 			    if cell_line in d: 
-				values.append(d[cell_line])
+				values.append(d[cell_line][0])
 		    if len(values) == 0:
 		        vals = ["NA"] * 2
 		    else:
 		        vals = [ numpy.median(values), numpy.max(values) ]
 		    feature_values.extend(vals)
+		    #print len(feature_values) 
 		    # CNV target
 		    for targets in (targets1, targets2):
 			values = []
@@ -210,13 +259,16 @@ def create_feature_file():
 			    if target in gene_to_cell_line_to_cnv:
 				d = gene_to_cell_line_to_cnv[target]
 				if cell_line in d: 
-				    values.append(d[cell_line])
+				    values.append(d[cell_line][0])
 			if len(values) == 0:
 			    val = "NA"
 			else:
 			    val = numpy.mean(values)
 			feature_values.append(val)
+			#print len(feature_values) 
 		f.write("%s %s %s\n" % (comb_id, cell_line, " ".join(map(str, feature_values))))
+		#if comb_id == "BCL2L1.Vinorelbine" and cell_line == "NCI-H1437": 
+		#    return
     f.close()
     for comb_id, cell_line_to_mono_values in combination_to_values.iteritems():
 	for cell_line in cell_line_to_mono_values:
@@ -244,7 +296,7 @@ def get_guild_based_synergy():
     # Get synergy info
     combination_to_values = get_synergy_info()
     # Check synergy between known pairs
-    combination_to_guild_values = get_guild_based_synergy_scores(drug_to_values.keys(), gexp_norm, gene_to_idx, cell_line_to_idx)
+    combination_to_guild_values = get_guild_based_synergy_scores(drug_to_values.keys(), None, gexp_norm, gene_to_idx, cell_line_to_idx)
     out_file = CONFIG.get("guild_file")
     f = open(out_file, 'w')
     f.write("comb.id cell.line max.a max.b med mean sd max min syn\n")
@@ -391,7 +443,17 @@ def get_cnv_info(file_name):
 	cnv_min = int(row[header_to_idx['min_cn_GRCh37']])
 	cnv_max = int(row[header_to_idx['max_cn_GRCh37']])
 	cnv = (cnv_min + cnv_max) / 2.0
-	cell_line_to_value[cell_line] = cnv
+	# take into account zygosity (H:0, LOH:1, O:2)
+	zygosity = row[header_to_idx['zygosity_GRCh37']]
+	if zygosity == "H":
+	    zygosity = 0
+	elif zygosity == "L":
+	    zygosity = 1
+	elif zygosity == "0":
+	    zygosity = 2
+	else:
+	    zygosity = 0
+	cell_line_to_value[cell_line] = (cnv, zygosity)
     f.close()
     cPickle.dump(gene_to_cell_line_to_value, open(dump_file, 'w')) 
     return gene_to_cell_line_to_value
@@ -517,81 +579,123 @@ def create_node_file(drug, target_to_score, nodes):
     return
 
 
-def get_guild_based_synergy_scores(drugs, gexp_norm, gene_to_idx, cell_line_to_idx):
-    dump_file = CONFIG.get("guild_dump")
-    if os.path.exists(dump_file):
-	combination_to_values = cPickle.load(open(dump_file))
-	return combination_to_values
+def get_guild_based_synergy_scores(drugs, genes_pathway, gexp_norm, gene_to_idx, cell_line_to_idx):
     output_dir = CONFIG.get("output_dir") + "/"
     use_expression = CONFIG.get("use_expression")
+    dump_file = CONFIG.get("guild_dump")
+    if os.path.exists(dump_file):
+	drug_to_top_genes = cPickle.load(open(dump_file))
+	#return combination_to_values
+    else:
+	drug_to_top_genes = {}
+	if use_expression != "pathway-genes":
+	    for i, drug in enumerate(drugs):
+		drug_file = "%s%s.ns" % (output_dir, drug)
+		if not os.path.exists(drug_file): # no targets
+		    drug_file = "%s%s.ns" % (output_dir, "background")
+		gene_to_score, values = get_top_genes_and_scores(drug_file)
+		# Top 500 genes and their scores
+		for k, cell_line in enumerate(cell_line_to_idx):
+		    print i, k, drug, cell_line
+		    drug_to_top_genes.setdefault(drug, {})[cell_line] = dict(values)
+	else:
+	    for i, drug in enumerate(drugs):
+		for k, cell_line in enumerate(cell_line_to_idx):
+		    print i, k, drug, cell_line
+		    drug_file = "%s%s.%s.ns" % (output_dir, drug, cell_line) 
+		    gene_to_score, values = get_top_genes_and_scores(drug_file)
+		    #drug_to_top_genes.setdefault(drug, {})[cell_line] = set(zip(*values)[0])
+		    # Top 500 genes and their scores
+		    drug_to_top_genes.setdefault(drug, {})[cell_line] = dict(values)
+	cPickle.dump(drug_to_top_genes, open(dump_file, 'w')) 
+    #pathway_gene_to_idx = dict((gene, i) for i, gene in enumerate(genes_pathway))
     combination_to_values = {}
     for i, drug1 in enumerate(drugs):
+	#print i, drug1
 	for j, drug2 in enumerate(drugs):
 	    if i >= j:
 		continue
+	    #print j, drug2
 	    comb_id = ".".join(sorted([drug1, drug2]))
-	    for cell_line in cell_line_to_idx:
-		if use_expression == "cell-line":
-		    suffix = "." % cell_line
-		else:
-		    suffix = ""
-		#print comb_id, drug1, drug2
-		drug1_file = "%s%s%s.ns" % (output_dir, drug1, suffix)
-		drug2_file = "%s%s%s.ns" % (output_dir, drug2, suffix)
-		drug1_to_score, values1 = get_top_genes_and_scores(drug1_file)
-		drug2_to_score, values2 = get_top_genes_and_scores(drug2_file)
-		genes1 = set(zip(*values1)[0])
-		genes2 = set(zip(*values2)[0])
-		genes_common = genes1 & genes2 
-		#print comb_id, drug1, drug2, len(genes_common)
-		if len(genes_common) == 0:
-		    continue
-		if use_expression != "cell-line":
-		    comb_file = "%s%s.%s%s.ns" % (output_dir, drug1, drug2, suffix)
-		    if not os.path.exists(comb_file):
-			comb_file = "%s%s.%s%s.ns" % (output_dir, drug2, drug1, suffix)
-			if not os.path.exists(comb_file):
-			    #print "Combination not found!"
-			    continue
+	    if use_expression != "pathway-genes":
+		comb_to_score = None
+		comb_file = "%s%s.%s.ns" % (output_dir, drug1, drug2)
+		if os.path.exists(comb_file):
 		    comb_to_score = guild_utilities.get_node_to_score(comb_file)
-		values = {} #[]
-		if use_expression == "cell-line":
-		    val = len(genes_common)
-		    values.setdefault(cell_line, []).append(val)
-		    #! Alternatively mutual coverage of pathways
-		    #for gene in genes_common:
-		    #	val = (drug1_to_score[gene] + drug2_to_score[gene]) / 2
-		    #	values.setdefault(cell_line, []).append(val)
-		elif use_expression == "no":
-		    for gene in genes_common:
-			val = comb_to_score[gene] - (drug1_to_score[gene] + drug2_to_score[gene]) / 2
-			#values.append(val)
-			values.setdefault(cell_line, []).append(val)
-		elif use_expression == "filter":
-		    genes_common_new = set()
-		    for gene in genes_common:
-			if gene not in gene_to_idx or cell_line not in cell_line_to_idx:
-			    continue
-			exp = gexp_norm[gene_to_idx[gene], cell_line_to_idx[cell_line]]
-			if exp < 1:
-			    continue
-			genes_common_new.add(gene)
-		    genes_common = genes_common_new
-		    for gene in genes_common:
-			val = comb_to_score[gene] - (drug1_to_score[gene] + drug2_to_score[gene]) / 2
-			#values.append(val)
-			values.setdefault(cell_line, []).append(val)
-		elif use_expression == "exact":
-		    for gene in genes_common:
-			if gene not in gene_to_idx or cell_line not in cell_line_to_idx:
-			    continue
-			exp = gexp_norm[gene_to_idx[gene], cell_line_to_idx[cell_line]]
-			#values.append(exp)
-			values.setdefault(cell_line, []).append(val)
-		if len(values) == 0:
-		    continue
-		combination_to_values[comb_id] = values
-    cPickle.dump(combination_to_values, open(dump_file, 'w')) 
+		else:
+		    comb_file = "%s%s.%s.ns" % (output_dir, drug2, drug1)
+		    if os.path.exists(comb_file):
+			comb_to_score = guild_utilities.get_node_to_score(comb_file)
+		    #else:
+			#print "Combination not found:", comb_id
+			#continue
+	    cell_line_to_values = {} 
+	    for cell_line in cell_line_to_idx:
+		genes_to_score1 = drug_to_top_genes[drug1][cell_line]
+		genes_to_score2 = drug_to_top_genes[drug2][cell_line]
+		genes_common = set(genes_to_score1.keys()) & set(genes_to_score2.keys())
+		#print comb_id, drug1, drug2, cell_line, len(genes_common)
+		values = [ len(genes_common) ]
+		if use_expression == "pathway-genes":
+		    # Mutual coverage of pathways
+		    values_inner = [ 0 ] * len(genes_pathway)
+		    for k, gene in enumerate(genes_pathway):
+			val = 0
+			if gene in genes_to_score1: 
+			    val += genes_to_score1[gene]
+			if gene in genes_to_score2:
+			    val += genes_to_score2[gene]
+			values_inner[k] = val
+			#if gene in genes_to_score1:
+			#    values_inner[k] += 1
+			#if gene in genes_to_score2:
+			#    values_inner[k] += 1
+		    #values.extend(values_inner)
+		    values.extend([numpy.mean(values_inner), numpy.max(values_inner)])
+		else:
+		    #if len(genes_common) == 0:
+		    #	print "No genes in common:", comb_id
+		    #	continue
+		    values_inner = []
+		    if use_expression == "no": 
+			if comb_to_score is None or len(genes_common) == 0:
+			    values_inner = [0]
+			else:
+			    for gene in genes_common:
+				val = comb_to_score[gene] - (genes_to_score1[gene] + genes_to_score2[gene]) / 2
+				values_inner.append(val)
+			values.extend([numpy.median(values_inner), numpy.max(values_inner)])
+		    elif use_expression == "filter":
+			genes_common_new = set()
+			for gene in genes_common:
+			    if gene not in gene_to_idx or cell_line not in cell_line_to_idx:
+				continue
+			    exp = gexp_norm[gene_to_idx[gene], cell_line_to_idx[cell_line]]
+			    if exp < 1:
+				continue
+			    genes_common_new.add(gene)
+			genes_common = genes_common_new
+			if comb_to_score is None or len(genes_common) == 0:
+			    values_inner = [0]
+			else:
+			    for gene in genes_common:
+				val = comb_to_score[gene] - (drug1_to_score[gene] + drug2_to_score[gene]) / 2
+				values_inner.append(val)
+			values.extend([numpy.median(values_inner), numpy.max(values_inner)])
+		    elif use_expression == "exact":
+			for gene in genes_common:
+			    if gene not in gene_to_idx or cell_line not in cell_line_to_idx:
+				continue
+			    val = gexp_norm[gene_to_idx[gene], cell_line_to_idx[cell_line]]
+			    values_inner.append(val)
+			if len(genes_common) == 0:
+			    values_inner = [0]
+			values.extend([numpy.median(values_inner), numpy.max(values_inner)])
+		    else:
+		        raise ValueError("Uknown parameter: %s" % use_expression)
+		cell_line_to_values[cell_line] = values
+	    combination_to_values[comb_id] = cell_line_to_values
+    #cPickle.dump(combination_to_values, open(dump_file, 'w')) 
     return combination_to_values 
 
 
@@ -649,6 +753,8 @@ def guild_drugs(drug_to_values, nodes, gexp_norm, gene_to_idx, cell_line_to_idx)
 	#   print "Not in network!"
 	#   continue
 	for cell_line, idx in cell_line_to_idx.iteritems():
+	    if cell_line == "647-V":
+		print cell_line, targets
 	    target_to_score = {}
 	    for target in targets: 
 		if target not in gene_to_idx:
