@@ -20,20 +20,20 @@ TODO:
 + imputation w/o synergy
 + use all training data set (better)
 ? using disease similarity (gexp correlation) as feature
-?correction for cell / drug drift (overall high / low)
-- cell line based drifts for confidence scoring (e.g., penalize 
-insensitive / high Einf cell lines)
-- using 0/1 scheme for ch2
+? correction for cell / drug drift (overall high / low)
++ using 0/1 scheme for ch2
 + shifting to categorized features (muts at pathway genes A B C: 0 1 1)
++ SEA / HitPick predictions, removing drugs w/o target info from training
++ features from ncomm paper, not cell line specific (ppi distance between targets / degree of targets)
++ cell line avg synergy based weights / drug combination avg synergy based features (no improvement)
++ correct missing similiarity combinations and cell line comb id integer conversion in process
++ recheck filtering (keep high synergy cutoff=+-5) - no imporvement / filter NAs for cnv
+- correct 1(0)/2(1) issue in ch2 output
+- check R scoring scripts
+- cell line based drifts for confidence scoring (e.g., penalize insensitive / high Einf cell lines)
+? confidence based on random model 
 o GUILD scoring for drugs (targets) for each cell line using gexp as 
 seed score, overlap at 1-5% / coverage of KEGG pathways (or n.comm pathways) at top
-? features from ncomm paper, not cell line specific (ppi distance between targets / degree of targets)
+- ch2 model with glmnet or cnv/2 + cosmic/2 + guild.med + guild.max
+- guild top 500 vs 1000
 
-=> gexp target categorized 35.6 (from 22 of non-categorized)
-=> + mut target categorized 38.2 (from 35.6 of gexp)
-=> gexp categorized only 35.4 (forget about mXXX, "gexp", "mut")
-=> cnv only "c" 41.6
-=> cnv both "c" and "z" 38.3
-=> g/c/p 35 - 36.3 (including correlated)
-=> g/c 36.6
-=> c/p 41.6

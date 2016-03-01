@@ -1,5 +1,6 @@
 
-from toolbox import configuration, guild_utilities, wrappers
+from toolbox import configuration, guild_utilities, wrappers, network_utilities
+from rdbox import drug_info
 from time import strftime
 import os, csv, numpy, cPickle
 try:
@@ -15,45 +16,108 @@ def main():
     #get_guild_based_synergy()
     # Create feature file
     create_feature_file()
+    # Get SEA & STITCH predictions
+    #print get_drug_info_with_predicted_targets()
     return
+
+
+def get_drug_info_with_predicted_targets():
+    file_name = CONFIG.get("drug_file") + ".predicted"
+    # Get drug info
+    drug_to_values = get_drug_info(nodes=None)
+    if os.path.exists(file_name):
+	f = open(file_name)
+	f.readline()
+	drug_to_targets_predicted = {}
+	for line in f:
+	    drug, targets, targets_org = line.strip("\n").split("\t")
+	    if targets != "":
+		drug_to_targets_predicted[drug] = set(targets.split(", "))
+    else:
+	#smiles_list = ["[H][C@]12C[C@@H](O)C=C[C@]11CCN(C)CC3=C1C(O2)=C(OC)C=C3"]
+	smiles_list = []
+	smiles_to_drug = {}
+	for drug, values in drug_to_values.iteritems():
+	    smiles = values[1] 
+	    if smiles.strip() == "":
+		continue
+	    smiles_list.append(smiles)
+	    smiles_to_drug[smiles] = drug
+	# Get SMILES similarity based predictions
+	#smiles_to_geneids = drug_info.get_chemical_similarity_based_target_predictions(CONFIG, smiles_list, cutoff=0.7, method="any_smiles") # majority_above
+	# Fisher's based test for taking into account of abundance of same target in many similar / dissimilar smiles
+	smiles_to_geneids = drug_info.get_chemical_similarity_based_target_predictions(CONFIG, smiles_list, cutoff=0.6, method="fishers") # 0.7 
+	#print len(smiles_to_geneids), smiles_to_geneids.items()[:5]
+	# Get gene names
+	geneid_to_names, name_to_geneid = wrappers.get_geneid_symbol_mapping(CONFIG.get("id_mapping_file"))
+	f = open(file_name, 'w')
+	f.write("Drug\tTargets (Predicted)\tTargets (Original)\n")
+	for smiles in smiles_list:
+	    genes = set()
+	    if smiles in smiles_to_geneids:
+		for geneid in smiles_to_geneids[smiles]:
+		    genes |= geneid_to_names[geneid]
+	    genes = list(genes)
+	    genes.sort()
+	    #f.write("%s\t%s\t%s\n" % (smiles_to_drug[smiles], smiles, ", ".join(genes)))
+	    targets_org = []
+	    if smiles in smiles_to_drug:
+		drug = smiles_to_drug[smiles]
+		if drug in drug_to_values:
+		    targets_org = drug_to_values[drug][0]
+	    f.write("%s\t%s\t%s\n" % (smiles_to_drug[smiles], ", ".join(genes), ", ".join(targets_org)))
+	f.close()
+    # Can check targets from STITCH for benchmarking
+    for drug, values in drug_to_values.iteritems():
+	if drug in drug_to_targets_predicted:
+	    targets_predicted = drug_to_targets_predicted[drug]
+	    values[0] = values[0] | targets_predicted
+    return drug_to_values
 
 
 def create_feature_file():
     # Get drug info
-    drug_to_values = get_drug_info(nodes=None)
+    #drug_to_values = get_drug_info(nodes=None)
+    drug_to_values = get_drug_info_with_predicted_targets()
+    #for drug, values in drug_to_values.iteritems():
+    #	if values[1] != "":
+    #	    print drug, values[1]
     print drug_to_values.items()[:3]
     # Get cell line info
     cell_line_to_value = get_cell_line_info()
     print cell_line_to_value.items()[:3]
     # Get synergy info
     combination_to_values = get_synergy_info()
-    print combination_to_values.items()[:3]
+    #print combination_to_values.items()[:3]
     # Get gexp info
-    gexp_norm, gene_to_idx, cell_line_to_idx = wrappers.get_expression_info(gexp_file = CONFIG.get("gexp_file"), process=set(["z", "abs"]), dump_file = CONFIG.get("gexp_dump"))
+    gexp_norm, gene_to_idx, cell_line_to_idx = wrappers.get_expression_info(gexp_file = CONFIG.get("gexp_file"), process=set(["z"]), dump_file = CONFIG.get("gexp_dump")) # process=set(["z", "abs"])
     values = [gene_to_idx["TSPAN6"], gene_to_idx["TNMD"]] 
     #print gexp_norm[values, cell_line_to_idx["647-V"]]
-    print "TNMD @ 647-V", gexp_norm[gene_to_idx["TNMD"], cell_line_to_idx["647-V"]] 
+    #print "TNMD @ 647-V", gexp_norm[gene_to_idx["TNMD"], cell_line_to_idx["647-V"]] 
     # Get mutation info
     gene_to_cell_line_to_mutation = get_mutation_info() 
     print gene_to_cell_line_to_mutation.items()[:3]
     # Get CNV info
     #gene_to_cell_line_to_cnv = {}
     gene_to_cell_line_to_cnv = get_cnv_info(CONFIG.get("cnv_file")) 
-    print gene_to_cell_line_to_cnv.items()[:2]
+    #print gene_to_cell_line_to_cnv.items()[:2]
     # Get cancer gene & pathway info
     pathway_to_genes = get_pathway_info(nodes=None)
-    print pathway_to_genes.keys()
+    #print pathway_to_genes.keys()
     genes_pathway = set()
     for genes in (pathway_to_genes["kegg"], pathway_to_genes["census"]):
 	genes_pathway |= genes
     genes_pathway = list(genes_pathway)
+    # Get network
+    network = wrappers.get_network(network_file = CONFIG.get("network_file"), only_lcc = True)
+    network_nodes = set(network.nodes())
     # Get GUILD info
     #combination_to_guild_values = {}
     combination_to_guild_values = get_guild_based_synergy_scores(drug_to_values.keys(), genes_pathway, gexp_norm, gene_to_idx, cell_line_to_idx)
-    print combination_to_guild_values.items()[:2]
+    #print combination_to_guild_values.items()[:2]
     # Get drug similarity info
     combination_to_similarity = get_drug_similarity(drug_to_values)
-    print combination_to_similarity.items()[:5]
+    #print combination_to_similarity.items()[:5]
     #values = combination_to_similarity.items()
     #values.sort(key=lambda x: x[1])
     #print values[-20:]
@@ -67,7 +131,7 @@ def create_feature_file():
     else:
 	raise ValueError("Uknown task: " + task)
     f = open(out_file, 'w')
-    features = ["gexpA", "gexpB", "mutA", "mutB", "cnvA", "cnvB", "sim.target", "sim.chemical", "guild.common", "guild.med", "guild.max", "kegg.in", "kegg.gexp.med", "kegg.gexp.max", "kegg.mut.med", "kegg.mut.max", "kegg.cnv.med", "kegg.cnv.max", "kegg.cnvA", "kegg.cnvB", "cosmic.in", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.mut.med", "cosmic.mut.max", "cosmic.cnv.med", "cosmic.cnv.max", "cosmic.cnvA", "cosmic.cnvB"]
+    features = ["gexpA", "gexpB", "mutA", "mutB", "cnvA", "cnvB", "sim.target", "sim.chemical", "kA", "kB", "dAB", "guild.common", "guild.med", "guild.max", "kegg.in", "kegg.gexp.med", "kegg.gexp.max", "kegg.mut.med", "kegg.mut.max", "kegg.cnv.med", "kegg.cnv.max", "kegg.cnvA", "kegg.cnvB", "cosmic.in", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.mut.med", "cosmic.mut.max", "cosmic.cnv.med", "cosmic.cnv.max", "cosmic.cnvA", "cosmic.cnvB"]
     drugs = drug_to_values.keys()
     seen_combinations = set()
     # Get all targets
@@ -162,7 +226,7 @@ def create_feature_file():
 		    if len(indices) == 0 or cell_line not in cell_line_to_idx:
 			val = "NA"
 		    else:
-			val = numpy.median(gexp_norm[indices, cell_line_to_idx[cell_line]])
+			val = numpy.median(numpy.abs(gexp_norm[indices, cell_line_to_idx[cell_line]]))
 		    feature_values.append(val)
 		    #print len(feature_values)
 		# MUT
@@ -199,6 +263,33 @@ def create_feature_file():
 		    vals = combination_to_similarity[comb_id]
 		feature_values.extend(vals)
 		#print len(feature_values) 
+		# Interaction network based features (degree A/B)
+		for targets in (targets1, targets2):
+		    values = []
+		    for target in targets:
+			if target in network_nodes:
+			    d = network.degree(target)
+			    values.append(d)
+		    if len(values) == 0:
+			val = "NA"
+		    else:
+			val = numpy.max(values)
+		    feature_values.append(val)
+		# Interaction network based distance between A-B
+		values = []
+		for target1 in targets1:
+		    if target1 not in network_nodes:
+			continue
+		    for target2 in targets2:
+			if target2 not in network_nodes:
+			    continue
+			d = network_utilities.get_shortest_path_length_between(network, target1, target2)
+			values.append(d)
+		if len(values) == 0:
+		    val = "NA"
+		else:
+		    val = numpy.min(values)
+		feature_values.append(val)
 		# GUILD
 		vals = ["NA"] * 3
 		if comb_id in combination_to_guild_values:
@@ -270,6 +361,7 @@ def create_feature_file():
 		#if comb_id == "BCL2L1.Vinorelbine" and cell_line == "NCI-H1437": 
 		#    return
     f.close()
+    print "Not in seen combinations:"
     for comb_id, cell_line_to_mono_values in combination_to_values.iteritems():
 	for cell_line in cell_line_to_mono_values:
 	    if (comb_id, cell_line) not in seen_combinations:
@@ -286,11 +378,12 @@ def get_guild_based_synergy():
     drug_to_values = get_drug_info(nodes=nodes)
     #print drug_to_values.keys()
     # Get gexp info
-    gexp_norm, gene_to_idx, cell_line_to_idx = wrappers.get_expression_info(gexp_file = CONFIG.get("gexp_file"), process=set(["z", "abs"]), dump_file = CONFIG.get("gexp_dump"))
+    gexp_norm, gene_to_idx, cell_line_to_idx = None, None, None
+    #gexp_norm, gene_to_idx, cell_line_to_idx = wrappers.get_expression_info(gexp_file = CONFIG.get("gexp_file"), process=set(["z", "abs"]), dump_file = CONFIG.get("gexp_dump"))
     # Check individual drugs
     guild_drugs(drug_to_values, nodes, gexp_norm, gene_to_idx, cell_line_to_idx)
     # Check pairwise drug combinations
-    #guild_combinations(drug_to_values, nodes, gexp_norm, gene_to_idx, cell_line_to_idx)
+    guild_combinations(drug_to_values, nodes, gexp_norm, gene_to_idx, cell_line_to_idx)
     return 
     # Now using create_feature_file instead of below
     # Get synergy info
@@ -474,7 +567,7 @@ def get_drug_info(nodes=None):
 	#    continue
 	smiles = row[-2]
 	smiles = list(sorted(map(lambda x: (len(x), x), smiles.split(";"))))[-1][1]
-	drug_to_values[drug] = (targets, smiles)
+	drug_to_values[drug] = [targets, smiles]
 	#print drug, targets
     f.close()
     return drug_to_values
@@ -487,7 +580,11 @@ def get_drug_similarity(drug_to_values):
 	for j, drug2 in enumerate(drugs):
 	    if i >= j:
 		continue
-	    comb_id = ".".join(sorted([drug1, drug2]))
+	    #comb_id = ".".join(sorted([drug1, drug2]))
+	    if drug1.lower() < drug2.lower():
+		comb_id = "%s.%s" % (drug1, drug2)
+	    else:
+		comb_id = "%s.%s" % (drug2, drug1)
 	    targets1, smiles1 = drug_to_values[drug1]
 	    targets2, smiles2 = drug_to_values[drug2]
 	    targets_common = targets1 & targets2
@@ -548,6 +645,8 @@ def get_synergy_info():
 	#synergy = float(synergy)
 	if comb_id != "%s.%s" % (drug1, drug2):
 	    print comb_id, drug1, drug2
+	if drug1.lower() > drug2.lower():
+	    raise ValueError("Inconsistent format!")
 	cell_line_to_values = combination_to_values.setdefault(comb_id, {})
 	if cell_line in cell_line_to_values: 
 	    print "Overwriting", comb_id, cell_line, max_a, max_b
@@ -596,12 +695,12 @@ def get_guild_based_synergy_scores(drugs, genes_pathway, gexp_norm, gene_to_idx,
 		gene_to_score, values = get_top_genes_and_scores(drug_file)
 		# Top 500 genes and their scores
 		for k, cell_line in enumerate(cell_line_to_idx):
-		    print i, k, drug, cell_line
+		    #print i, k, drug, cell_line
 		    drug_to_top_genes.setdefault(drug, {})[cell_line] = dict(values)
 	else:
 	    for i, drug in enumerate(drugs):
 		for k, cell_line in enumerate(cell_line_to_idx):
-		    print i, k, drug, cell_line
+		    #print i, k, drug, cell_line
 		    drug_file = "%s%s.%s.ns" % (output_dir, drug, cell_line) 
 		    gene_to_score, values = get_top_genes_and_scores(drug_file)
 		    #drug_to_top_genes.setdefault(drug, {})[cell_line] = set(zip(*values)[0])
@@ -616,7 +715,11 @@ def get_guild_based_synergy_scores(drugs, genes_pathway, gexp_norm, gene_to_idx,
 	    if i >= j:
 		continue
 	    #print j, drug2
-	    comb_id = ".".join(sorted([drug1, drug2]))
+	    #comb_id = ".".join(sorted([drug1, drug2]))
+	    if drug1.lower() < drug2.lower():
+		comb_id = "%s.%s" % (drug1, drug2)
+	    else:
+		comb_id = "%s.%s" % (drug2, drug1)
 	    if use_expression != "pathway-genes":
 		comb_to_score = None
 		comb_file = "%s%s.%s.ns" % (output_dir, drug1, drug2)
@@ -704,7 +807,7 @@ def get_top_genes_and_scores(score_file):
     #print node_to_score.items()[:3]
     values = node_to_score.items()
     values.sort(key=lambda x: x[1])
-    return node_to_score, values[-500:]
+    return node_to_score, values[-int(CONFIG.get("n_top_in_guild")):]
 
 
 def guild_combinations(drug_to_values, nodes, gexp_norm, gene_to_idx, cell_line_to_idx):
@@ -712,35 +815,44 @@ def guild_combinations(drug_to_values, nodes, gexp_norm, gene_to_idx, cell_line_
     flag = False # True #
     z_value = float(CONFIG.get("z_value"))
     for i, drug1 in enumerate(drugs):
-	if drug1 == "NAE":
-	    flag = True
-	if drug1 == "Docetaxel":
-	    flag = False
-	if not flag:
-	    continue
+	#if drug1 == "NAE":
+	#    flag = True
+	#if drug1 == "Docetaxel":
+	#    flag = False
+	#if not flag:
+	#    continue
 	for j, drug2 in enumerate(drugs):
 	    if i < j:
 		targets1, smiles1 = drug_to_values[drug1]
 		targets2, smiles2 = drug_to_values[drug2]
 		targets = targets1 | targets2
-		if len(targets) == max(len(targets1), len(targets2)):
-		    #print "Combination redundant!"
-		    #continue
-		    pass
+		if drug1.lower() < drug2.lower():
+		    combination = "%s.%s" % (drug1, drug2)
+		else:
+		    combination = "%s.%s" % (drug2, drug1)
 		combination = "%s.%s" % (drug1, drug2)
 		#print combination, targets
+		#if len(targets) == max(len(targets1), len(targets2)):
+		#    print "Combination redundant!"
+		#    continue
 		#if len(targets & nodes) == 0:
 		#   print "Not in network!"
 		#   continue
-		for cell_line, idx in cell_line_to_idx.iteritems():
+		if gexp_norm is not None:
+		    for cell_line, idx in cell_line_to_idx.iteritems():
+			target_to_score = {}
+			for target in targets: 
+			    if target not in gene_to_idx:
+				target_to_score[target] = z_value
+			    else:
+				val = gexp_norm[gene_to_idx[target], idx]
+				target_to_score[target] = z_value if val < z_value else val
+			run_guild(combination + ".%s" % cell_line, target_to_score, nodes, qname="all.q")
+		else:
 		    target_to_score = {}
 		    for target in targets: 
-			if target not in gene_to_idx:
-			    target_to_score[target] = z_value
-			else:
-			    val = gexp_norm[gene_to_idx[target], idx]
-			    target_to_score[target] = z_value if val < z_value else val
-		    run_guild(combination + ".%s" % cell_line, target_to_score, nodes, qname="all.q")
+			target_to_score[target] = 1
+		    run_guild(combination, target_to_score, nodes, qname="all.q")
     return
 
 
@@ -752,17 +864,23 @@ def guild_drugs(drug_to_values, nodes, gexp_norm, gene_to_idx, cell_line_to_idx)
 	#if len(targets & nodes) == 0:
 	#   print "Not in network!"
 	#   continue
-	for cell_line, idx in cell_line_to_idx.iteritems():
-	    if cell_line == "647-V":
-		print cell_line, targets
+	if gexp_norm is not None:
+	    for cell_line, idx in cell_line_to_idx.iteritems():
+		if cell_line == "647-V":
+		    print cell_line, targets
+		target_to_score = {}
+		for target in targets: 
+		    if target not in gene_to_idx:
+			target_to_score[target] = z_value
+		    else:
+			val = gexp_norm[gene_to_idx[target], idx]
+			target_to_score[target] = z_value if val < z_value else val
+		run_guild(drug + ".%s" % cell_line, target_to_score, nodes, qname="all.q") 
+	else:
 	    target_to_score = {}
 	    for target in targets: 
-		if target not in gene_to_idx:
-		    target_to_score[target] = z_value
-		else:
-		    val = gexp_norm[gene_to_idx[target], idx]
-		    target_to_score[target] = z_value if val < z_value else val
-	    run_guild(drug + ".%s" % cell_line, target_to_score, nodes, qname="all.q") 
+		target_to_score[target] = 1
+	    run_guild(drug, target_to_score, nodes, qname="all.q") 
     return
 
 
@@ -778,13 +896,15 @@ def run_guild(drug, target_to_score, nodes, qname=None): #targets
     n_repetition = int(CONFIG.get("n_repetition"))
     n_iteration = int(CONFIG.get("n_iteration"))
     # Get and run the GUILD command
-    score_command = executable_path + ' -s s -n "%s" -e "%s" -o "%s" -r %d -i %d' % (node_file, network_lcc_file, output_file, n_repetition, n_iteration)
     #print strftime("%H:%M:%S - %d %b %Y") #, score_command
+    score_command = ' -s s -n "%s" -e "%s" -o "%s" -r %d -i %d' % (node_file, network_lcc_file, output_file, n_repetition, n_iteration)
     if qname is None:
+	score_command = executable_path + score_command
 	os.system(score_command)
     else:
 	#os.system("qsub -cwd -o out -e err -q %s -N %s -b y %s" % (qname, scoring_type, score_command))
-	print "qsub -cwd -o out -e err -q %s -N guild_%s -b y %s" % (qname, drug, score_command)
+	#print "qsub -cwd -o out -e err -q %s -N guild_%s -b y %s" % (qname, drug, score_command)
+	print "%s" % (score_command.replace('"', ''))
     return
 
 
