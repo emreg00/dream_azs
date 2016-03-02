@@ -77,8 +77,8 @@ def get_drug_info_with_predicted_targets():
 
 def create_feature_file():
     # Get drug info
-    #drug_to_values = get_drug_info(nodes=None)
-    drug_to_values = get_drug_info_with_predicted_targets()
+    drug_to_values = get_drug_info(nodes=None) 
+    #drug_to_values = get_drug_info_with_predicted_targets() # worsens the performance
     #for drug, values in drug_to_values.iteritems():
     #	if values[1] != "":
     #	    print drug, values[1]

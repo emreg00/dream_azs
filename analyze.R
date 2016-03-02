@@ -2,6 +2,7 @@ library(caret)
 library(ggplot2)
 library(reshape2)
 library(plyr)
+source("ch1scoring_fc.R")
 
 data.dir = "../data/"
 output.dir = "../doc/"
@@ -11,13 +12,14 @@ main<-function() {
     #set.seed(555444)
     #set.seed(999999)
     #challenge = "ch1a"
-    #challenge = "ch1b" # not allowed to  use response / gexp data 
-    challenge = "ch2"
+    challenge = "ch1b_all_possible" # not allowed to  use response / gexp data 
+    #!
+    #challenge = "ch2"
     rfFit = NULL
     gbmFit = NULL
     modFit = NULL
     mod.list = train.model(challenge)
-    #return() #!
+    return() #!
     rfFit = mod.list$rfFit
     gbmFit = mod.list$gbmFit
     modFit = mod.list$modFit
@@ -48,7 +50,7 @@ process.features<-function(f, challenge, is.train=T) {
     }
 
     #e$gexp = ifelse(is.na(abs(e$gexpA-e$gexpB)), min(abs(e$gexpA), abs(e$gexpB), na.rm=T), abs(e$gexpA-e$gexpB))
-    e$gexp = abs(e$gexpA + e$gexpB)
+    e$gexp = abs(e$gexpA - e$gexpB)
     #e$gexp.diff = abs(e$gexpA-e$gexpB)
     e$mut = ifelse(is.na(abs(e$mutA-e$mutB)), min(e$mutA, e$mutB, na.rm=T), abs(e$mutA-e$mutB))
     #e[is.na(e$mut), "mut"] = 0 
@@ -87,6 +89,11 @@ process.features<-function(f, challenge, is.train=T) {
 	f.mod$comb.id = factor(f$COMBINATION_ID)
 	f.mod$cell.line = factor(f$CELL_LINE)
 	f = f.mod
+	# Drug response based features
+	f$einf = abs(f$Einf_A - f$Einf_B)
+	f$conc = abs(f$MAX_CONC_A - f$MAX_CONC_B)
+	f$ic50 = abs(f$IC50_A - f$IC50_B)
+	f$h = abs(f$H_A - f$H_B)
 	#print(head(f)) 
     }
 
@@ -105,15 +112,19 @@ process.features<-function(f, challenge, is.train=T) {
 	# 22RV1 CAL-120 HCC1143 HCC1428 HCC1937 KU-19-19 UACC-812 VCaP
 	cell.lines = as.vector(a[a$einf.min>cutoff,"cell.line"])
 	indices = f$cell.line %in% cell.lines
-	f = f[-indices,] 
-	f.mod = f.mod[-indices,]
+	if(length(indices) > 0) {
+	    f = f[-indices,] 
+	    f.mod = f.mod[-indices,]
+	}
 	# Remove combinations with missing info / low synergy 
 	#indices = which(abs(f$cat) < 5) # - no improvement
 	indices = which(is.na(f$cnv))
 	#indices = which(is.na(f$cnv) | is.na(f$guild.med))
 	#indices = which(is.na(f$cnv) | is.na(f$sim.chemical))
-	f = f[-indices,] 
-	f.mod = f.mod[-indices,] 
+	if(length(indices) > 0) {
+	    f = f[-indices,] 
+	    f.mod = f.mod[-indices,] 
+	}
     }
     print(sprintf("Number of instances: %d", nrow(f)))
 
@@ -125,32 +136,30 @@ process.features<-function(f, challenge, is.train=T) {
     #features = c(features, colnames(e)[3:(which(colnames(e) == "gexpA")-1)]) 
     #!
     features = c()
-    indices = which(grepl("^\\.[gcz]", colnames(e))) # gcz
+    indices = which(grepl("^\\.[gmczp]", colnames(e))) 
     features = colnames(e)[indices]
-    #features = c("cnv", "sim.chemical", "cosmic.in", features)
-    features = c("gexp", "cnv", "sim.target", "sim.chemical", "cosmic.in", "kegg.in", features)
-    #features = c("cnv", "sim.target", "sim.chemical", "cosmic.in", "kegg.in", features)
+    #! features = c("mut", "cnv", "sim.target", "sim.chemical", "cosmic.in", "kegg.in", features)
+    features = c("gexp", "mut", "cnv", "sim.target", "sim.chemical", "cosmic.in", "kegg.in", features)
     features = c("guild.common", "guild.med", "guild.max", features)
     features = c("k.diff", "k.min", "k.max", "dAB", features)
     #features = c(".cEGFR", ".cBRAF", ".cTOP2A", ".cTOP2B", ".cALK", ".cATR", ".cTUBB1", ".cBCL2L1", ".cIGF1R", ".cMAP2K3", ".cCHECK1", ".cADAM17", ".cPIP5KIA", ".cFGFR1", features)
-    #features = c("gexp", "mut", "cnv", "sim.target", "sim.chemical", "kegg.in", "cosmic.in", features)
     #features = c("cell.med",  "comb.med", features)
-    indices = which(colnames(f) %in% c(features)) # , "cat"
 
-    print(sprintf("Features: %s", paste(features, collapse=", ")))
-
-
-    # Before keeping a copy to assign cat values afterwards
-    #f.mod = f
     # Use all features
     if(challenge == "ch1a") {
-	f = f[, c(4:11, indices)]
+	features = c("einf", "h", "conc", "ic50", "gexp", features)
     # Use anything except monotherapy data
-    } else if(grepl("^ch1b", challenge) | challenge == "ch2") {
-	f = f[, indices]
+    } else if(challenge == "ch2") {
+	features = c("gexp", features)
+    # Use anything except monotherapy and gexp data
+    } else if(grepl("^ch1b", challenge)) {
+	# Noting special
     } else {    
 	stop("Unrecognized challenge!")
     }
+    indices = which(colnames(f) %in% c(features)) 
+    f = f[, indices]
+    print(sprintf("Features: %s", paste(features, collapse=", ")))
 
     if(is.train == T) {
 	# Check variance 
@@ -233,17 +242,41 @@ train.model<-function(challenge) {
     testing = f[-inTrain, ]
 
     # Build model(s)
-    if(T) { #!
+    if(F) { #!
 	# Simple decision tree for developmental/debugging purposes
 	#modFit = train(cat ~ ., data = training, method='ctree', tuneLength=10,
 	#	  trControl=trainControl(method='cv', number=10)) #, classProbs=F, summaryFunction=twoClassSummary))
-	modFit = train(cat ~ ., data = training, method='glmnet', trControl=trainControl(method='cv', number=10)) 
 	#modFit = myClassifier(training)
 	rfFit = NULL
 	gbmFit = NULL
-	pred = predict(modFit, testing)
-	#print(predictors(modFit))
-	#print(modFit)
+	#ml.methods = c("rf", "gbm") # 43 / 38
+	#ml.methods = c("gaussprRadial") # 31
+	#ml.methods = c("rlm", "bayesglm", "gaussprLinear") # poor
+	#ml.methods = c("avNNet", "enet") # poor
+	#ml.methods = c("lasso", "relaxo", "ridge") # poor
+	# for ch2 
+	#ml.methods = c("rf", "gbm") # 62.6 / 59 (ch2)
+	#ml.methods = c("gaussprRadial") # 54
+	#ml.methods = c("LogitBoost", "glmnet") # 53.7 / 48.6
+	#ml.methods = c("logreg") failed
+	#ml.methods = c("gamboost") # failed
+	#ml.methods = c("ada") # 59.5 
+	#ml.methods = c("glm", "glmnet") # 48 / 48.5
+	for(ml.method in ml.methods) {
+	    print(ml.method)
+	    modFit = train(cat ~ ., data = training, method = ml.method, trControl = trainControl(method='cv', number=10)) 
+	    pred = predict(modFit, testing)
+	    #print(predictors(modFit))
+	    #print(modFit)
+	    if(challenge == "ch2") { 
+		a = confusionMatrix(pred, testing$cat)
+	    } else {
+		a = cor(pred, testing$cat) 
+	    }
+	    print(ml.method)
+	    print(a)
+	}
+	return(list(rfFit=rfFit, gbmFit=gbmFit, modFit=modFit)); 
     } else {
 	# trainControl: boot for bootstrapping, cv for x-validation # repeatedcv for repeated 10-fold CV 
 	ctrl = trainControl(method = "cv") 
@@ -265,6 +298,8 @@ train.model<-function(challenge) {
 	print(a)
 	# Tree boost
 	gbmFit = train(cat ~ ., data=training, method = "gbm", preProcess = prep, trControl = ctrl, verbose=F)
+	#!
+	#gbmFit = train(cat ~ ., data=training, method = "ada", preProcess = prep, trControl = ctrl, verbose=F)
 	print(predictors(gbmFit))
 	pred = predict(gbmFit, testing)
 	if(challenge == "ch2") { 
@@ -273,13 +308,7 @@ train.model<-function(challenge) {
 	    a = cor(pred, testing$cat) 
 	}
 	print(a)
-	# Ridge (regression L2 regularization)
-	#ridgeFit = train(cat ~ ., data=training, method = "ridge", preProcess = prep, trControl = ctrl)
-	# Linear regression
-	#glmFit = train(cat ~ ., data=training, method = "glm", preProcess = prep, trControl = ctrl)
-	# Lasso (regression with L1 regularization)
-	#lassoFit = train(cat ~ ., data=training, method = "lasso", preProcess = prep, trControl = ctrl)
-	# gam to combine to predictors e.g., rf glm
+	# gam to combine to predictors e.g., rf gbm
 	pred.1 = predict(rfFit, testing)
 	pred.2 = predict(gbmFit, testing)
 	pred.comb = data.frame(pred.1, pred.2, cat=testing$cat)
@@ -294,10 +323,8 @@ train.model<-function(challenge) {
     }
     print(a)
 
-    return(list(rfFit=rfFit, gbmFit=gbmFit, modFit=modFit)); #!
-
     dir.create(paste0(output.dir, challenge))
-    write.table(testing$cat, paste0(output.dir, "/", "observed.dat"))
+    write.table(testing$cat, paste0(output.dir, challenge, "/", "observed.dat"))
     write.table(pred, paste0(output.dir, challenge, "/", "prediction.dat"))
 
     # Plot prediction consistency
@@ -308,7 +335,17 @@ train.model<-function(challenge) {
 
     f.mod$COMBINATION_ID = f.mod$comb.id
     f.mod$CELL_LINE = f.mod$cell.line
-    output.predictions(challenge, f.mod[-inTrain,], testing)
+    testing$cat = pred
+    # Output predictions for testing set
+    output.predictions(challenge, f.mod[-inTrain,], testing, suffix=".test")
+    # Output values for training set
+    output.predictions(challenge, f.mod[-inTrain,], f[-inTrain,], suffix=".test.observed")
+    # Get organizer's scores
+
+    obs.file = paste0(output.dir, challenge, "/", "prediction.csv.test.observed")
+    pred.file = paste0(output.dir, challenge, "/", "prediction.csv.test")
+    conf.file = paste0(output.dir, challenge, "/", "combination_priority.csv.test")
+    check.scoring(obs.file, pred.file, conf.file) 
 
     return(list(rfFit=rfFit, gbmFit=gbmFit, modFit=modFit));
 }
@@ -367,7 +404,7 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
 }
 
 
-output.predictions<-function(challenge, f, testing) {
+output.predictions<-function(challenge, f, testing, suffix="") {
     # Get confidence scores for learderboard data (assign lower confidence to larger values)
     #! Consider assigning scores based on the cell line senstivity (i.e. Einf) or performance on training set
     if(challenge == "ch2") { 
@@ -381,22 +418,22 @@ output.predictions<-function(challenge, f, testing) {
     # Output predictions
     if(challenge == "ch2") {
 	f$cat = testing$cat 
-	print(head(f$cat)) #!
+	#print(head(f$cat)) 
 	f$conf = testing$conf
 	d = acast(f, comb.id~cell.line, value.var="cat")
 	print(head(d)) #!
 	#! check why output is 1s and 2s
-	file.name = paste0(output.dir, challenge, "/", "synergy_matrix.csv")
+	file.name = paste0(output.dir, challenge, "/", "synergy_matrix.csv", suffix)
 	write.csv(d, file.name)
 	d = acast(f, comb.id~cell.line, value.var="conf")
-	file.name = paste0(output.dir, challenge, "/", "confidence_matrix.csv")
+	file.name = paste0(output.dir, challenge, "/", "confidence_matrix.csv", suffix)
 	write.csv(d, file.name)
     } else {
 	f$PREDICTION = testing$cat
 	f$CONFIDENCE = testing$conf
-	file.name = paste0(output.dir, challenge, "/", "prediction.csv")
+	file.name = paste0(output.dir, challenge, "/", "prediction.csv", suffix)
 	write.csv(f[,c("CELL_LINE", "COMBINATION_ID", "PREDICTION")], file.name, row.names=F)
-	file.name = paste0(output.dir, challenge, "/", "combination_priority.csv")
+	file.name = paste0(output.dir, challenge, "/", "combination_priority.csv", suffix)
 	a = f[,c("COMBINATION_ID", "CONFIDENCE")]
 	a = aggregate(CONFIDENCE~COMBINATION_ID, a, mean)
 	write.csv(a, file.name, row.names=F)
@@ -416,6 +453,16 @@ predict.myClassifierClass = function(modelObject) {
     return(rlogis(length(modelObject$y)))
 } 
 
+
+check.scoring<-function(obs.file, pred.file, conf.file="inexistant_file.not") {
+    #obs.file = "../doc/ch1b/prediction.csv.test.observed"
+    #pred.file = "../doc/ch1b/prediction.csv.test"
+    #conf.file = "../doc/ch1b/combination_priority.csv.test"
+    a = getDrugCombiScore_ch1(obs.file, pred.file, confidence=conf.file)
+    print(sprintf("Primary score: %.3f", a["mean"]))
+    a = getGlobalScore_ch1(obs.file, pred.file)
+    print(sprintf("Global score: %.3f (%.3f)", a["final"], a["tiebreak"]))
+}
 
 main()
 
