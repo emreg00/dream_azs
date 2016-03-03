@@ -19,8 +19,6 @@ TODO:
 + using pathway & cosmic genes as features
 + imputation w/o synergy
 + use all training data set (better)
-? using disease similarity (gexp correlation) as feature
-? correction for cell / drug drift (overall high / low)
 + using 0/1 scheme for ch2
 + shifting to categorized features (muts at pathway genes A B C: 0 1 1)
 + SEA / HitPick predictions, removing drugs w/o target info from training
@@ -29,14 +27,15 @@ TODO:
 + correct missing similiarity combinations and cell line comb id integer conversion in process
 + recheck filtering (keep high synergy cutoff=+-5) - no imporvement / filter NAs for cnv
 + redefine monotherapy response features (difference of A-B)
-+ check R scoring scripts
++ check R scoring scripts from DREAM
 + check different models / consider only using RF
 - correct 1(0)/2(1) issue in ch2 output
 - cell line based drifts for confidence scoring (e.g., penalize insensitive / high Einf cell lines)
-? confidence based on random model 
-o GUILD scoring for drugs (targets) for each cell line using gexp as 
-seed score, overlap at 1-5% / coverage of KEGG pathways (or n.comm pathways) at top
 - ch2 model with glmnet or cnv/2 + cosmic/2 + guild.med + guild.max
 - guild top 500 vs 1000
 - building a classifier using gexp etc data to predict monotherapy response to be used in ch2
+? confidence based on random model 
+? GUILD scoring for drugs (targets) for each cell line using gexp as seed score, overlap at 1-5% / coverage of KEGG pathways (or n.comm pathways) at top
+? using disease similarity (gexp correlation) as feature
+? correction for cell / drug drift (overall high / low)
 

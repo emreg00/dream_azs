@@ -3,6 +3,7 @@ library(ggplot2)
 library(reshape2)
 library(plyr)
 source("ch1scoring_fc.R")
+source("ch2scoring_fc.R")
 
 data.dir = "../data/"
 output.dir = "../doc/"
@@ -12,14 +13,14 @@ main<-function() {
     #set.seed(555444)
     #set.seed(999999)
     #challenge = "ch1a"
-    challenge = "ch1b_all_possible" # not allowed to  use response / gexp data 
+    #challenge = "ch1b" # not allowed to  use response / gexp data 
     #!
-    #challenge = "ch2"
+    challenge = "ch2"
     rfFit = NULL
     gbmFit = NULL
     modFit = NULL
     mod.list = train.model(challenge)
-    return() #!
+    #return() #!
     rfFit = mod.list$rfFit
     gbmFit = mod.list$gbmFit
     modFit = mod.list$modFit
@@ -138,7 +139,7 @@ process.features<-function(f, challenge, is.train=T) {
     features = c()
     indices = which(grepl("^\\.[gmczp]", colnames(e))) 
     features = colnames(e)[indices]
-    #! features = c("mut", "cnv", "sim.target", "sim.chemical", "cosmic.in", "kegg.in", features)
+    #features = c("mut", "cnv", "sim.target", "sim.chemical", "cosmic.in", "kegg.in", features)
     features = c("gexp", "mut", "cnv", "sim.target", "sim.chemical", "cosmic.in", "kegg.in", features)
     features = c("guild.common", "guild.med", "guild.max", features)
     features = c("k.diff", "k.min", "k.max", "dAB", features)
@@ -242,13 +243,14 @@ train.model<-function(challenge) {
     testing = f[-inTrain, ]
 
     # Build model(s)
-    if(F) { #!
+    if(F) { 
 	# Simple decision tree for developmental/debugging purposes
 	#modFit = train(cat ~ ., data = training, method='ctree', tuneLength=10,
 	#	  trControl=trainControl(method='cv', number=10)) #, classProbs=F, summaryFunction=twoClassSummary))
 	#modFit = myClassifier(training)
 	rfFit = NULL
 	gbmFit = NULL
+	ml.methods = c("ctree")
 	#ml.methods = c("rf", "gbm") # 43 / 38
 	#ml.methods = c("gaussprRadial") # 31
 	#ml.methods = c("rlm", "bayesglm", "gaussprLinear") # poor
@@ -300,6 +302,7 @@ train.model<-function(challenge) {
 	gbmFit = train(cat ~ ., data=training, method = "gbm", preProcess = prep, trControl = ctrl, verbose=F)
 	#!
 	#gbmFit = train(cat ~ ., data=training, method = "ada", preProcess = prep, trControl = ctrl, verbose=F)
+	#gbmFit = train(cat ~ ., data=training, method = "glmnet", preProcess = prep, trControl = ctrl, verbose=F)
 	print(predictors(gbmFit))
 	pred = predict(gbmFit, testing)
 	if(challenge == "ch2") { 
@@ -335,17 +338,15 @@ train.model<-function(challenge) {
 
     f.mod$COMBINATION_ID = f.mod$comb.id
     f.mod$CELL_LINE = f.mod$cell.line
-    testing$cat = pred
+    # Output observed values for test set (for ch2 the original synergy file is used)
+    if(challenge != "ch2") {
+	output.predictions(challenge, f.mod[-inTrain,], testing, suffix=".test.observed")
+    }
     # Output predictions for testing set
+    testing$cat = pred
     output.predictions(challenge, f.mod[-inTrain,], testing, suffix=".test")
-    # Output values for training set
-    output.predictions(challenge, f.mod[-inTrain,], f[-inTrain,], suffix=".test.observed")
     # Get organizer's scores
-
-    obs.file = paste0(output.dir, challenge, "/", "prediction.csv.test.observed")
-    pred.file = paste0(output.dir, challenge, "/", "prediction.csv.test")
-    conf.file = paste0(output.dir, challenge, "/", "combination_priority.csv.test")
-    check.scoring(obs.file, pred.file, conf.file) 
+    check.scoring(challenge, obs.file, pred.file, conf.file) 
 
     return(list(rfFit=rfFit, gbmFit=gbmFit, modFit=modFit));
 }
@@ -406,8 +407,10 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
 
 output.predictions<-function(challenge, f, testing, suffix="") {
     # Get confidence scores for learderboard data (assign lower confidence to larger values)
-    #! Consider assigning scores based on the cell line senstivity (i.e. Einf) or performance on training set
+    # Consider assigning scores based on the cell line senstivity (i.e. Einf) or performance on training set
     if(challenge == "ch2") { 
+	# Output is categorical, if not converted 1s and 2s 
+	testing$cat = ifelse(testing$cat == "1", 1, 0) 
 	# Not very meaningful, prediction 0/1 # check whether there is 0 div error
 	testing$conf = 1-as.numeric(testing$cat)/max(as.numeric(testing$cat))
     } else {
@@ -418,14 +421,12 @@ output.predictions<-function(challenge, f, testing, suffix="") {
     # Output predictions
     if(challenge == "ch2") {
 	f$cat = testing$cat 
-	#print(head(f$cat)) 
 	f$conf = testing$conf
-	d = acast(f, comb.id~cell.line, value.var="cat")
-	print(head(d)) #!
-	#! check why output is 1s and 2s
+	d = acast(f, comb.id~cell.line, value.var="cat", fun.aggregate = function(x){round(mean(x, na.rm=T))}) #{max(x, na.rm=T)} # Max returns -Inf if all NA
+	#print(summary(d))
 	file.name = paste0(output.dir, challenge, "/", "synergy_matrix.csv", suffix)
 	write.csv(d, file.name)
-	d = acast(f, comb.id~cell.line, value.var="conf")
+	d = acast(f, comb.id~cell.line, value.var="conf", fun.aggregate = function(x){round(mean(x, na.rm=T))}) 
 	file.name = paste0(output.dir, challenge, "/", "confidence_matrix.csv", suffix)
 	write.csv(d, file.name)
     } else {
@@ -454,15 +455,53 @@ predict.myClassifierClass = function(modelObject) {
 } 
 
 
-check.scoring<-function(obs.file, pred.file, conf.file="inexistant_file.not") {
-    #obs.file = "../doc/ch1b/prediction.csv.test.observed"
-    #pred.file = "../doc/ch1b/prediction.csv.test"
-    #conf.file = "../doc/ch1b/combination_priority.csv.test"
-    a = getDrugCombiScore_ch1(obs.file, pred.file, confidence=conf.file)
-    print(sprintf("Primary score: %.3f", a["mean"]))
-    a = getGlobalScore_ch1(obs.file, pred.file)
-    print(sprintf("Global score: %.3f (%.3f)", a["final"], a["tiebreak"]))
+check.scoring<-function(challenge, obs.file, pred.file, conf.file="inexistant_file.not") {
+    if(challenge == "ch2") {
+	#obs.file = paste0(output.dir, challenge, "/", "synergy_matrix.csv.test.observed")
+	obs.file = paste0(data.dir, "Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv")
+	pred.file = paste0(output.dir, challenge, "/", "synergy_matrix.csv.test")
+	conf.file = paste0(output.dir, challenge, "/", "confidence_matrix.csv.test")
+	a = getGlobalScore_ch2(obs.file, pred.file)
+	print(sprintf("Global score: %.2f", a))
+	#!
+	#a = getOneDimScore_ch2(obs.file, pred.file, confidence=conf.file) # confidence="none"
+	#print(sprintf("One dimensional score (row): %.3f", a))
+    } else {
+	obs.file = paste0(output.dir, challenge, "/", "prediction.csv.test.observed")
+	pred.file = paste0(output.dir, challenge, "/", "prediction.csv.test")
+	conf.file = paste0(output.dir, challenge, "/", "combination_priority.csv.test")
+	a = getDrugCombiScore_ch1(obs.file, pred.file, confidence=conf.file)
+	print(sprintf("Primary score: %.3f", a["mean"]))
+	a = getGlobalScore_ch1(obs.file, pred.file)
+	print(sprintf("Global score: %.3f (%.3f)", a["final"], a["tiebreak"]))
+    }
 }
+
+
+get.methylation.values.for.genes<-function() {
+    #!
+    # From https://www.biostars.org/p/135446/
+    library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+    txdb = TxDb.Hsapiens.UCSC.hg19.knownGene
+    genes = genes(txdb)
+    #cpg = data.frame(vals=c("chr1:91190489-91192804","chr22:20674706-20675153"))
+    #gr = makeGRangesFromDataFrame(cpg) # need strand info
+    cpg = data.frame(chrname=c("chr1", "chr22"), start=c(91190489, 20674706), end=c(91192804, 20675153))
+    gr = GRanges(cpg$chrname, IRanges(cpg$start, cpg$end))
+    gene.ids = names(genes[nearest(gr, genes)])
+    #gene.ids = genes[precede(gr, genes)]
+    library(org.Hs.eg.db)
+    # Gene id - symbol map # For the reverse map: org.Hs.egSYMBOL2EG 
+    x = org.Hs.egSYMBOL 
+    # Get the gene symbol that are mapped to an entrez gene identifiers
+    mapped_genes <- mappedkeys(x)
+    # Convert to a list
+    xx <- as.list(x[mapped_genes])
+    if(length(xx) > 0) {
+	xx[gene.ids]
+    }
+}
+
 
 main()
 
