@@ -29,7 +29,7 @@ TODO:
 + redefine monotherapy response features (difference of A-B)
 + check R scoring scripts from DREAM
 + check different models / consider only using RF
-- correct 1(0)/2(1) issue in ch2 output
++ correct 1(0)/2(1) issue in ch2 output
 - cell line based drifts for confidence scoring (e.g., penalize insensitive / high Einf cell lines)
 - ch2 model with glmnet or cnv/2 + cosmic/2 + guild.med + guild.max
 - guild top 500 vs 1000
