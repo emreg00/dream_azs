@@ -82,21 +82,24 @@ def create_feature_file():
     #for drug, values in drug_to_values.iteritems():
     #	if values[1] != "":
     #	    print drug, values[1]
-    print drug_to_values.items()[:3]
+    #print drug_to_values.items()[:3]
     # Get cell line info
     cell_line_to_value = get_cell_line_info()
-    print cell_line_to_value.items()[:3]
+    #print cell_line_to_value.items()[:3]
     # Get synergy info
     combination_to_values = get_synergy_info()
     #print combination_to_values.items()[:3]
     # Get gexp info
     gexp_norm, gene_to_idx, cell_line_to_idx = wrappers.get_expression_info(gexp_file = CONFIG.get("gexp_file"), process=set(["z"]), dump_file = CONFIG.get("gexp_dump")) # process=set(["z", "abs"])
-    values = [gene_to_idx["TSPAN6"], gene_to_idx["TNMD"]] 
+    #values = [gene_to_idx["TSPAN6"], gene_to_idx["TNMD"]] 
     #print gexp_norm[values, cell_line_to_idx["647-V"]]
     #print "TNMD @ 647-V", gexp_norm[gene_to_idx["TNMD"], cell_line_to_idx["647-V"]] 
+    # Get methylation info
+    meth, meth_gene_to_idx, meth_cell_line_to_idx = wrappers.get_expression_info(gexp_file = CONFIG.get("methylation_file"), process=set(["z"]), dump_file = CONFIG.get("methylation_dump")) 
+    #print "A1BG @ 647-V", meth[meth_gene_to_idx["A1BG"], meth_cell_line_to_idx["647-V"]]
     # Get mutation info
     gene_to_cell_line_to_mutation = get_mutation_info() 
-    print gene_to_cell_line_to_mutation.items()[:3]
+    #print gene_to_cell_line_to_mutation.items()[:3]
     # Get CNV info
     #gene_to_cell_line_to_cnv = {}
     gene_to_cell_line_to_cnv = get_cnv_info(CONFIG.get("cnv_file")) 
@@ -131,7 +134,7 @@ def create_feature_file():
     else:
 	raise ValueError("Uknown task: " + task)
     f = open(out_file, 'w')
-    features = ["gexpA", "gexpB", "mutA", "mutB", "cnvA", "cnvB", "sim.target", "sim.chemical", "kA", "kB", "dAB", "guild.common", "guild.med", "guild.max", "kegg.in", "kegg.gexp.med", "kegg.gexp.max", "kegg.mut.med", "kegg.mut.max", "kegg.cnv.med", "kegg.cnv.max", "kegg.cnvA", "kegg.cnvB", "cosmic.in", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.mut.med", "cosmic.mut.max", "cosmic.cnv.med", "cosmic.cnv.max", "cosmic.cnvA", "cosmic.cnvB"]
+    features = ["gexpA.med", "gexpA.amed", "gexpB.med", "gexpB.amed", "mutA", "mutB", "cnvA", "cnvB", "metA.med", "metA.amed", "metB.med", "metB.amed", "sim.target", "sim.chemical", "kA", "kB", "dAB", "guild.common", "guild.med", "guild.max", "kegg.inA", "kegg.inB", "kegg.gexp.med", "kegg.gexp.max", "kegg.mut.med", "kegg.mut.max", "kegg.cnv.med", "kegg.cnv.max", "kegg.cnvA", "kegg.cnvB", "cosmic.inA", "cosmic.inB", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.mut.med", "cosmic.mut.max", "cosmic.cnv.med", "cosmic.cnv.max", "cosmic.cnvA", "cosmic.cnvB"]
     drugs = drug_to_values.keys()
     seen_combinations = set()
     # Get all targets
@@ -146,13 +149,16 @@ def create_feature_file():
     targets_all = list(targets_all)
     target_to_idx = dict((target, i) for i, target in enumerate(targets_all))
     # Get all pathway genes
-    targets_pathway = set()
-    for genes in (pathway_to_genes["kegg"], pathway_to_genes["census"]):
-	targets_pathway |= genes
-    targets_pathway = list(targets_pathway & set(targets_all))
-    pathway_target_to_idx = dict((gene, i) for i, gene in enumerate(targets_pathway))
+    #targets_pathway = set()
+    #for genes in (pathway_to_genes["kegg"], pathway_to_genes["census"]): 
+    #	targets_pathway |= genes
+    #targets_pathway = list(targets_pathway & set(targets_all))
+    #pathway_target_to_idx = dict((gene, i) for i, gene in enumerate(targets_pathway))
+    targets_pathway = []
+    for pathway, genes in pathway_to_genes.iteritems():
+	targets_pathway.append(pathway)
     # Create header
-    features = map(lambda x: ".g" + x, targets_all) + map(lambda x: ".m" + x, targets_all) + map(lambda x: ".c" + x, targets_all) + map(lambda x: ".z" + x, targets_all) + map(lambda x: ".p" + x, targets_pathway) + features
+    features = map(lambda x: ".g" + x, targets_all) + map(lambda x: ".m" + x, targets_all) + map(lambda x: ".c" + x, targets_all) + map(lambda x: ".z" + x, targets_all) + map(lambda x: ".e" + x, targets_all) + map(lambda x: ".p" + x.replace("_", "."), targets_pathway) + features
     f.write("comb.id cell.line %s\n" % " ".join(features))
     for i, drug1 in enumerate(drugs):
 	for j, drug2 in enumerate(drugs):
@@ -195,7 +201,7 @@ def create_feature_file():
 				values[target_to_idx[target]] += d[cell_line]
 		feature_values.extend(values)
 		#print len(feature_values)
-		# CNV categorized
+		# CNV & ZYG categorized
 		values = [ 0 ] * len(targets_all)
 		values2 = [ 0 ] * len(targets_all)
 		for targets in (targets1, targets2):
@@ -208,13 +214,24 @@ def create_feature_file():
 				values2[target_to_idx[target]] += d[cell_line][1]
 		feature_values.extend(values) 
 		feature_values.extend(values2) 
+		# METH categorized
+		values = [ 0 ] * len(targets_all)
+		if cell_line in meth_cell_line_to_idx:
+		    for targets in (targets1, targets2):
+			for target in targets:
+			    if target in meth_gene_to_idx:
+				values[target_to_idx[target]] += meth[meth_gene_to_idx[target], meth_cell_line_to_idx[cell_line]]
+		feature_values.extend(values)	
 		#print len(feature_values)
 		# KEGG / COSMIC INVOLVEMENT categorized
 		values = [ 0 ] * len(targets_pathway)
-		for targets in (targets1, targets2):
-		    for target in targets:
-			if target in pathway_target_to_idx:
-			    values[pathway_target_to_idx[target]] += 1
+		#for targets in (targets1, targets2):
+		    #for target in targets:
+			#if target in pathway_target_to_idx:
+			#    values[pathway_target_to_idx[target]] += 1
+		for k, pathway in enumerate(targets_pathway):
+		    values[k] += len(targets1 & pathway_to_genes[pathway])
+		    values[k] += len(targets2 & pathway_to_genes[pathway])
 		feature_values.extend(values) 
 		#print len(feature_values) 
 		# GEXP
@@ -224,10 +241,11 @@ def create_feature_file():
 			if target in gene_to_idx:
 			    indices.append(gene_to_idx[target])
 		    if len(indices) == 0 or cell_line not in cell_line_to_idx:
-			val = "NA"
+			vals = ["NA"] * 2
 		    else:
-			val = numpy.median(numpy.abs(gexp_norm[indices, cell_line_to_idx[cell_line]]))
-		    feature_values.append(val)
+			values = gexp_norm[indices, cell_line_to_idx[cell_line]]
+			vals = [numpy.median(values), numpy.median(numpy.abs(values))] #values.flat[numpy.abs(values).argmax()]]
+		    feature_values.extend(vals)
 		    #print len(feature_values)
 		# MUT
 		for targets in (targets1, targets2):
@@ -256,6 +274,20 @@ def create_feature_file():
 		    else:
 			val = numpy.max(values)
 		    feature_values.append(val)
+		    #print len(feature_values)
+		# METH
+		for targets in (targets1, targets2):
+		    indices = []
+		    for target in targets:
+			if target in meth_gene_to_idx:
+			    indices.append(meth_gene_to_idx[target])
+		    if len(indices) == 0 or cell_line not in meth_cell_line_to_idx:
+			vals = ["NA"] * 2
+		    else:
+			#val = numpy.median(numpy.abs(meth[indices, meth_cell_line_to_idx[cell_line]]))
+			values = meth[indices, meth_cell_line_to_idx[cell_line]]
+			vals = [numpy.median(values), numpy.median(numpy.abs(values))] 
+		    feature_values.extend(vals)
 		    #print len(feature_values)
 		# SIMILARITY
 		vals = ["NA"] * 2
@@ -303,8 +335,8 @@ def create_feature_file():
 		    # INVOLVEMENT
 		    val = 0
 		    for targets in (targets1, targets2):
-			val += int(len(targets & genes) > 0) 
-		    feature_values.append(val)
+			val = len(targets & genes)
+			feature_values.append(val)
 		    #print len(feature_values) 
 		    # GEXP
 		    for target in genes:
@@ -405,27 +437,30 @@ def get_guild_based_synergy():
 
 def get_pathway_info(nodes):
     pathway_to_genes = wrappers.get_pathway_info(pathway_file = CONFIG.get("pathway_file"), prefix = CONFIG.get("pathway_source"), nodes = nodes)
-    print len(pathway_to_genes) 
+    #print len(pathway_to_genes) 
     #values = map(lambda x: (x[0], len(x[1])), pathway_to_genes.items())
     #values.sort(key=lambda x: x[1])
     #print values[-10:]
     #genes = pathway_to_genes["kegg_pathways_in_cancer"]
     #genes_merged = set()
-    pathways_to_include = ["pathways_in_cancer", "aminoacyl-tRNA biosynthesis", "MAPK signaling pathway", "NF-kappa B signaling pathway"]
-    pathways_to_include += ["Cell Cycle", "p53 signaling pathway", "Apoptosis", "TGF-beta signaling pathway"]
+    #pathways_to_include = ["pathways in cancer", "aminoacyl-tRNA biosynthesis", "MAPK signaling pathway", "NF-kappa B signaling pathway"]
+    #pathways_to_include += ["Cell Cycle", "p53 signaling pathway", "Apoptosis", "TGF-beta signaling pathway"]
+    pathways_to_include = CONFIG.get("pathways_to_include").split("|")
     #pathways_to_include += ["colorectal cancer", "small cell lung cancer", "non small cell lung cancer", "prostate cancer"]
     pathways_to_include = [ pathway.lower().replace("-", "_").replace(" ", "_") for pathway in pathways_to_include ]
     pathway_to_geneids_mod = {}
     for key, values in pathway_to_genes.iteritems():
 	if key.find("cancer") != -1 and key != "kegg_pathways_in_cancer":
-	    print key, len(values)
+	    pass
+	    #print key, len(values)
 	    #genes_merged |= pathway_to_genes[key]
 	elif key.find("growth") != -1 or key.find("apoptosis") != -1:
-	    print key, len(values)
+	    pass
+	    #print key, len(values)
     genes = set()
     for pathway in pathways_to_include:
 	try:
-	    #pathway_to_geneids_mod[pathway] = pathway_to_genes["kegg_" + pathway]
+	    pathway_to_geneids_mod[pathway] = pathway_to_genes["kegg_" + pathway]
 	    genes |= pathway_to_genes["kegg_" + pathway]
 	except:
 	    print "Pathway not found!", pathway
@@ -639,6 +674,10 @@ def get_synergy_info():
 	max_a, max_b = map(float, row[3:5])
 	#"IC50_A","H_A","Einf_A","IC50_B","H_B","Einf_B"
 	synergy, qa, comb_id = row[-3:]
+	if task.endswith("-train"):
+	    synergy = float(synergy)
+	else:
+	    synergy = None
 	qa = int(qa)
 	if qa != 1:
 	    continue
@@ -648,9 +687,21 @@ def get_synergy_info():
 	if drug1.lower() > drug2.lower():
 	    raise ValueError("Inconsistent format!")
 	cell_line_to_values = combination_to_values.setdefault(comb_id, {})
+	flag = True
 	if cell_line in cell_line_to_values: 
-	    print "Overwriting", comb_id, cell_line, max_a, max_b
-	cell_line_to_values[cell_line] = (max_a, max_b, synergy)
+	    #print "Keeping 1/1 concentration (if exists) or max abs synergy", comb_id, cell_line, max_a, max_b, synergy, "(", cell_line_to_values[cell_line],")"
+	    max_a2, max_b2, synergy2 = cell_line_to_values[cell_line]
+	    if max_a2 == 1 and max_b2 == 1:
+		if synergy is not None and max_a == 1 and max_b == 1 and abs(synergy) > abs(synergy2):
+		    flag = True
+		else:
+		    flag = False
+	    elif max_a == 1 and max_b == 1:
+		flag = True
+	    elif synergy is not None and abs(synergy) > abs(synergy2):
+		flag = True
+	if flag:
+	    cell_line_to_values[cell_line] = [max_a, max_b, synergy]
     f.close()
     return combination_to_values 
 

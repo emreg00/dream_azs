@@ -14,8 +14,7 @@ main<-function() {
     #set.seed(999999)
     #challenge = "ch1a"
     #challenge = "ch1b" # not allowed to  use response / gexp data 
-    #!
-    challenge = "ch2" #! use cnv and reliable subset only (for ch1 use all possible) / all-all was better than sub
+    challenge = "ch2" #! check using cnv and reliable subset only vs all (all was better)
     rfFit = NULL
     gbmFit = NULL
     modFit = NULL
@@ -24,7 +23,7 @@ main<-function() {
     rfFit = mod.list$rfFit
     gbmFit = mod.list$gbmFit
     modFit = mod.list$modFit
-    get.predictions(challenge, rfFit, gbmFit, modFit, rebuild=F) #rebuild=T
+    get.predictions(challenge, rfFit, gbmFit, modFit, rebuild=T)
 }
 
 
@@ -51,16 +50,18 @@ process.features<-function(f, challenge, is.train=T) {
     }
 
     #e$gexp = ifelse(is.na(abs(e$gexpA-e$gexpB)), min(abs(e$gexpA), abs(e$gexpB), na.rm=T), abs(e$gexpA-e$gexpB))
-    e$gexp = abs(e$gexpA - e$gexpB)
-    #e$gexp.diff = abs(e$gexpA-e$gexpB)
+    #e$gexp = abs(e$gexpA.amed - e$gexpB.amed)
+    e$gexp = e$gexpA.med * e$gexpB.med
+    e$met = e$metA.med * e$metB.med
     e$mut = ifelse(is.na(abs(e$mutA-e$mutB)), min(e$mutA, e$mutB, na.rm=T), abs(e$mutA-e$mutB))
     #e[is.na(e$mut), "mut"] = 0 
     #e$cnv = ifelse(is.na(abs(e$cnvA-e$cnvB)), min(e$cnvA, e$cnvB, na.rm=T), abs(e$cnvA-e$cnvB))
-    e$cnv = abs(e$cnvA-e$cnvB)
+    e$cnv = abs(e$cnvA - e$cnvB)
     e$k.diff = abs(e$kA-e$kB)
     e$k.min = apply(e[,c("kA", "kB")], 1, min)
     e$k.max = apply(e[,c("kA", "kB")], 1, max)
-    #e[is.na(e$cnv),"cnv"] = 0
+    e$kegg.in = (e$kegg.inA + e$kegg.inB) 
+    e$cosmic.in = (e$cosmic.inA + e$cosmic.inB) 
     #e$kegg.cnv = ifelse(is.na(abs(e$kegg.cnvA-e$kegg.cnvB)), min(e$kegg.cnvA, e$kegg.cnvB, na.rm=T), abs(e$kegg.cnvA-e$kegg.cnvB))
     #e$cosmic.cnv = ifelse(is.na(abs(e$cosmic.cnvA-e$cosmic.cnvB)), min(e$cosmic.cnvA, e$cosmic.cnvB, na.rm=T), abs(e$cosmic.cnvA-e$cosmic.cnvB))
 
@@ -137,26 +138,32 @@ process.features<-function(f, challenge, is.train=T) {
     #features = c(features, colnames(e)[3:(which(colnames(e) == "gexpA")-1)]) 
     #!
     features = c()
-    indices = which(grepl("^\\.[gmczp]", colnames(e))) 
-    #indices = which(grepl("^\\.[c]", colnames(e))) 
-    features = colnames(e)[indices]
-    #features = c("gexp", "cnv", "sim.chemical", "cosmic.in", features) # reliable sub
-    #features = c("mut", "cnv", "sim.target", "sim.chemical", "cosmic.in", "kegg.in", features)
-    features = c("gexp", "mut", "cnv", "sim.target", "sim.chemical", "cosmic.in", "kegg.in", features)
+    indices = which(grepl("^\\.[mczp]", colnames(e))) # no .e, .g is added below
+    #! features = c(colnames(e)[indices], features)
+    features = c("mut", "cnv", "sim.target", "sim.chemical", features) 
     features = c("guild.common", "guild.med", "guild.max", features)
     features = c("k.diff", "k.min", "k.max", "dAB", features)
-    #features = c(".cEGFR", ".cBRAF", ".cTOP2A", ".cTOP2B", ".cALK", ".cATR", ".cTUBB1", ".cBCL2L1", ".cIGF1R", ".cMAP2K3", ".cCHECK1", ".cADAM17", ".cPIP5KIA", ".cFGFR1", features)
-    #features = c("cell.med",  "comb.med", features)
+    features = c("cosmic.in", "kegg.in", features)
+    #features = c("gexp", "cnv", "sim.chemical", "cosmic.in", features) # somewhat reliable sub
+    #features = c("cell.med", "comb.med", features)
 
     # Use all features
     if(challenge == "ch1a") {
-	features = c("einf", "h", "conc", "ic50", "gexp", features)
+	indices = which(grepl("^\\.[g]", colnames(e)))
+	features = c(colnames(e)[indices], features)
+	features = c("einf", "h", "conc", "ic50", "gexp", "met", features)
     # Use anything except monotherapy data
     } else if(challenge == "ch2") {
-	features = c("gexp", features)
-    # Use anything except monotherapy and gexp data
+	indices = which(grepl("^\\.[g]", colnames(e)))
+	features = c(colnames(e)[indices], features)
+	features = c("gexp", "met", features)
+    # Use anything except monotherapy, gexp and met data
     } else if(grepl("^ch1b", challenge)) {
-	# Noting special
+	# Nothing special
+	#! need to remove below
+	indices = which(grepl("^\\.[p]", colnames(e)))
+	features = c(colnames(e)[indices], features)
+	features = c("gexp", features)
     } else {    
 	stop("Unrecognized challenge!")
     }
@@ -174,7 +181,6 @@ process.features<-function(f, challenge, is.train=T) {
 	if (length(zv.idx) > 0) {
 	    f = f[, -zv.idx]
 	}
-	#print(summary(f))
     }
 
     # Imputing and scaling
@@ -247,7 +253,7 @@ train.model<-function(challenge) {
     testing = f[-inTrain, ]
 
     # Build model(s)
-    if(T) { #!
+    if(F) { #!
 	# Simple decision tree for developmental/debugging purposes
 	#modFit = train(cat ~ ., data = training, method='ctree', tuneLength=10,
 	#	  trControl=trainControl(method='cv', number=10)) #, classProbs=F, summaryFunction=twoClassSummary))
@@ -256,7 +262,8 @@ train.model<-function(challenge) {
 	gbmFit = NULL
 	#ml.methods = c("ctree")
 	#ml.methods = c("glmnet")
-	ml.methods = c("rf", "gbm", "gaussprRadial") #, "glmnet")
+	ml.methods = c("rf", "gbm") 
+	#ml.methods = c("gaussprRadial", "glmnet")
 	#ml.methods = c("ada")
 	#ml.methods = c("rf", "gbm") # 43 / 38
 	#ml.methods = c("gaussprRadial") # 31
@@ -299,8 +306,8 @@ train.model<-function(challenge) {
 	return(list(rfFit=rfFit, gbmFit=gbmFit, modFit=modFit)); 
     } else {
 	# trainControl: boot for bootstrapping, cv for x-validation # repeatedcv for repeated 10-fold CV 
-	ctrl = trainControl(method = "cv") 
-	#ctrl = trainControl(method = "repeatedcv", number = 10, repeats = 3)
+	#ctrl = trainControl(method = "cv", number = 10) 
+	ctrl = trainControl(method = "repeatedcv", number = 10, repeats = 3)
 	prep = NULL # c("center", "scale") # Already preprocessed above
 	# Random forest
 	rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl) # using default for kNN, k=5
@@ -317,10 +324,10 @@ train.model<-function(challenge) {
 	}
 	print(a)
 	# Tree boost
-	#gbmFit = train(cat ~ ., data=training, method = "gbm", preProcess = prep, trControl = ctrl, verbose=F)
+	gbmFit = train(cat ~ ., data=training, method = "gbm", preProcess = prep, trControl = ctrl, verbose=F)
 	#!
 	#gbmFit = train(cat ~ ., data=training, method = "ada", preProcess = prep, trControl = ctrl, verbose=F)
-	gbmFit = train(cat ~ ., data=training, method = "glmnet", preProcess = prep, trControl = ctrl, verbose=F)
+	#gbmFit = train(cat ~ ., data=training, method = "glmnet", preProcess = prep, trControl = ctrl, verbose=F)
 	print(predictors(gbmFit))
 	pred = predict(gbmFit, testing)
 	if(challenge == "ch2") { 
