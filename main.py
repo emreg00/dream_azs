@@ -88,6 +88,7 @@ def create_feature_file():
     #print cell_line_to_value.items()[:3]
     # Get synergy info
     combination_to_values = get_synergy_info()
+    cell_line_to_synergy, combination_to_synergy = get_synergy_values_per_cell_line_and_combination()
     #print combination_to_values.items()[:3]
     # Get gexp info
     gexp_norm, gene_to_idx, cell_line_to_idx = wrappers.get_expression_info(gexp_file = CONFIG.get("gexp_file"), process=set(["z"]), dump_file = CONFIG.get("gexp_dump")) # process=set(["z", "abs"])
@@ -134,7 +135,7 @@ def create_feature_file():
     else:
 	raise ValueError("Uknown task: " + task)
     f = open(out_file, 'w')
-    features = ["gexpA.med", "gexpA.amed", "gexpB.med", "gexpB.amed", "mutA", "mutB", "cnvA", "cnvB", "metA.med", "metA.amed", "metB.med", "metB.amed", "sim.target", "sim.chemical", "kA", "kB", "dAB", "guild.common", "guild.med", "guild.max", "kegg.inA", "kegg.inB", "kegg.gexp.med", "kegg.gexp.max", "kegg.mut.med", "kegg.mut.max", "kegg.cnv.med", "kegg.cnv.max", "kegg.cnvA", "kegg.cnvB", "cosmic.inA", "cosmic.inB", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.mut.med", "cosmic.mut.max", "cosmic.cnv.med", "cosmic.cnv.max", "cosmic.cnvA", "cosmic.cnvB"]
+    features = ["gexpA.med", "gexpA.amed", "gexpB.med", "gexpB.amed", "mutA", "mutB", "cnvA", "cnvB", "metA.med", "metA.amed", "metB.med", "metB.amed", "cell.med", "comb.med", "sim.target", "sim.chemical", "kA", "kB", "dAB", "guild.common", "guild.med", "guild.max", "kegg.inA", "kegg.inB", "kegg.gexp.med", "kegg.gexp.max", "kegg.mut.med", "kegg.mut.max", "kegg.cnv.med", "kegg.cnv.max", "kegg.cnvA", "kegg.cnvB", "cosmic.inA", "cosmic.inB", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.mut.med", "cosmic.mut.max", "cosmic.cnv.med", "cosmic.cnv.max", "cosmic.cnvA", "cosmic.cnvB"]
     drugs = drug_to_values.keys()
     seen_combinations = set()
     # Get all targets
@@ -289,6 +290,12 @@ def create_feature_file():
 			vals = [numpy.median(values), numpy.median(numpy.abs(values))] 
 		    feature_values.extend(vals)
 		    #print len(feature_values)
+		# MEDIAN SYNERGY per cell line / combination
+		vals = ["NA"] * 2
+		if cell_line in cell_line_to_synergy:
+		    vals[0] = cell_line_to_synergy[cell_line]
+		if comb_id in combination_to_synergy:
+		    vals[1] = combination_to_synergy[comb_id]
 		# SIMILARITY
 		vals = ["NA"] * 2
 		if comb_id in combination_to_similarity:
@@ -655,8 +662,25 @@ def get_drug_similarity(drug_to_values):
     return combination_to_similarity
 
 
-def get_synergy_info():
-    task = CONFIG.get("task")
+def get_synergy_values_per_cell_line_and_combination():
+    # Assigning median synergy for per cell line / drug combination
+    cell_line_to_synergy = {}
+    combination_to_synergy = {}
+    combination_to_values = get_synergy_info(task="-train")
+    for comb_id, cell_line_to_mono_values in combination_to_values.iteritems():
+	for cell_line, values in cell_line_to_mono_values.iteritems():
+	    cell_line_to_synergy.setdefault(cell_line, []).append(values[-1])
+	    combination_to_synergy.setdefault(combination, []).append(values[-1])
+    for cell_line, values in cell_line_to_synergy.items():
+	cell_line_to_synergy[cell_line] = numpy.median(values)
+    for combination, values in combination_to_synergy.items():
+	 combination_to_synergy[combination] = numpy.median(values)
+    return cell_line_to_synergy, combination_to_synergy
+
+
+def get_synergy_info(task=None):
+    if task is None:
+	task = CONFIG.get("task")
     if task.endswith("-train"):
 	combination_file = CONFIG.get("combination_file_train")
     elif task == "ch1-test":

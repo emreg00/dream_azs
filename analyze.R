@@ -7,14 +7,17 @@ source("ch2scoring_fc.R")
 
 data.dir = "../data/"
 output.dir = "../doc/"
+train.file = "Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv"
+#train.file = "Drug_synergy_data/train_merged.csv" #!
+test.file = "Drug_synergy_data/ch1_test_monoTherapy.csv"
 
 main<-function() {
-    set.seed(142341)
+    set.seed(142341) 
     #set.seed(555444)
     #set.seed(999999)
     #challenge = "ch1a"
-    #challenge = "ch1b" # not allowed to  use response / gexp data 
-    challenge = "ch2" #! check using cnv and reliable subset only vs all (all was better)
+    challenge = "ch1b_sub2" # not allowed to  use response / gexp data 
+    #challenge = "ch2" #! check using cnv and reliable subset only vs all (all was better)
     rfFit = NULL
     gbmFit = NULL
     modFit = NULL
@@ -23,11 +26,16 @@ main<-function() {
     rfFit = mod.list$rfFit
     gbmFit = mod.list$gbmFit
     modFit = mod.list$modFit
-    get.predictions(challenge, rfFit, gbmFit, modFit, rebuild=T)
+    get.predictions(challenge, rfFit, gbmFit, modFit, rebuild=F) #! rebuild=T
 }
 
 
-get.synergy.data<-function(file.name, challenge, is.train) {
+get.synergy.data<-function(challenge, is.train) {
+    if(is.train) {
+	file.name = train.file
+    } else{
+	file.name = test.file
+    }
     f = read.csv(paste0(data.dir, file.name))
     #f$syn = f[,"SYNERGY_SCORE"]
     #f$syn.einf = f[,"SYNERGY_SCORE"] / (1 + f[, "Einf_A"] + f[, "Einf_B"])
@@ -48,9 +56,17 @@ process.features<-function(f, challenge, is.train=T) {
     } else {
 	e = read.table(paste0(data.dir, "features_test_ch1.dat"), header=T)
     }
+    d = read.csv(paste0(data.dir, "cell_info.csv")) 
+    # Put tissue info as a categorized feature
+    d = data.frame(row.names = d$Sanger.Name, tissue = gsub("[ /()]", ".", d$Tissue..General.))
+    f$.t = d[f$CELL_LINE, "tissue"]
+    f = cbind(f, model.matrix(~.t + 0, f))
+    f = f[,-which(colnames(f) == ".t")]
+    #ggplot(f, aes(x=CELL_LINE, y=SYNERGY_SCORE)) + geom_boxplot(aes(color=tissue))
+    #print(summary(f))
 
     #e$gexp = ifelse(is.na(abs(e$gexpA-e$gexpB)), min(abs(e$gexpA), abs(e$gexpB), na.rm=T), abs(e$gexpA-e$gexpB))
-    #e$gexp = abs(e$gexpA.amed - e$gexpB.amed)
+    #e$gexp = abs(e$gexpA.amed - e$gexpB.amed) 
     e$gexp = e$gexpA.med * e$gexpB.med
     e$met = e$metA.med * e$metB.med
     e$mut = ifelse(is.na(abs(e$mutA-e$mutB)), min(e$mutA, e$mutB, na.rm=T), abs(e$mutA-e$mutB))
@@ -65,10 +81,11 @@ process.features<-function(f, challenge, is.train=T) {
     #e$kegg.cnv = ifelse(is.na(abs(e$kegg.cnvA-e$kegg.cnvB)), min(e$kegg.cnvA, e$kegg.cnvB, na.rm=T), abs(e$kegg.cnvA-e$kegg.cnvB))
     #e$cosmic.cnv = ifelse(is.na(abs(e$cosmic.cnvA-e$cosmic.cnvB)), min(e$cosmic.cnvA, e$cosmic.cnvB, na.rm=T), abs(e$cosmic.cnvA-e$cosmic.cnvB))
 
-    # Assign cell line avg synergy as a feature - no improvement
-    #if(is.train) {
+    # Assign cell line / drug median synergy as a feature 
+    #if(is.train) { # it does not exists for test data - need to store it in feature file
     #	a = ddply(f, ~ CELL_LINE, summarize, syn.med = median(cat))
     #	b = ddply(f, ~ COMBINATION_ID, summarize, syn.med = median(cat))
+    #	#d = ddply(f, ~tissue, summarise, syn.med = median(SYNERGY_SCORE))
     #}
 
     if(challenge == "ch2" & is.train == F) {
@@ -77,16 +94,13 @@ process.features<-function(f, challenge, is.train=T) {
     } else {
 	m = nrow(f)
 	n = ncol(f) + ncol(e)
-	#n = n + 2 # for checking avg synergy over combinations / cell lines
 	f.mod = data.frame(matrix(nrow=m, ncol=n))
 	for(i in 1:m) {
 	    comb = as.character(f[i, "COMBINATION_ID"])
 	    cell = as.character(f[i, "CELL_LINE"])
 	    f.mod[i,] = c(f[i,], e[e$comb.id == comb & e$cell.line == cell, ])
-	    # Assign cell line avg synergy as a feature
-	    #f.mod[i,] = c(f.mod[i,], a[a$CELL_LINE == cell, "syn.med"], b[b$COMBINATION_ID == comb, "syn.med"]) 
 	}
-	colnames(f.mod) = c(colnames(f), colnames(e)) #, "cell.med", "comb.med")
+	colnames(f.mod) = c(colnames(f), colnames(e))
 	# To correct integer converted comb names and cell lines
 	f.mod$comb.id = factor(f$COMBINATION_ID)
 	f.mod$cell.line = factor(f$CELL_LINE)
@@ -121,8 +135,6 @@ process.features<-function(f, challenge, is.train=T) {
 	# Remove combinations with missing info / low synergy 
 	#indices = which(abs(f$cat) < 5) # - no improvement
 	indices = which(is.na(f$cnv))
-	#indices = which(is.na(f$cnv) | is.na(f$guild.med))
-	#indices = which(is.na(f$cnv) | is.na(f$sim.chemical))
 	if(length(indices) > 0) {
 	    f = f[-indices,] 
 	    f.mod = f.mod[-indices,] 
@@ -131,39 +143,40 @@ process.features<-function(f, challenge, is.train=T) {
     print(sprintf("Number of instances: %d", nrow(f)))
 
     # Choose features to include
-    #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.gex.med", "kegg.gex.max", "kegg.cnv.med", "kegg.cnv.max", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.cnv.med", "cosmic.cnv.max", "kegg.in", "cosmic.in") # (no in) 41.9 / (in) 39.9
-    #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.in", "cosmic.in") # (no in) 41.3 / (in) 44.9
-    #features = c("gexp", "mut", "cnv", "guild.med", "guild.max", "sim.target", "sim.chemical", "kegg.in", "cosmic.in") 
-    #features = c("gexp", "mut") 
-    #features = c(features, colnames(e)[3:(which(colnames(e) == "gexpA")-1)]) 
+    #features = c("kegg.gex.med", "kegg.gex.max", "kegg.cnv.med", "kegg.cnv.max", "cosmic.gexp.med", "cosmic.gexp.max", "cosmic.cnv.med", "cosmic.cnv.max") # not used anymore
+    #features = c("gexp", "cnv", "sim.chemical", "cosmic.in", features) # somewhat reliable sub
     #!
     features = c()
-    indices = which(grepl("^\\.[mczp]", colnames(e))) # no .e, .g is added below
-    #! features = c(colnames(e)[indices], features)
-    features = c("mut", "cnv", "sim.target", "sim.chemical", features) 
-    features = c("guild.common", "guild.med", "guild.max", features)
-    features = c("k.diff", "k.min", "k.max", "dAB", features)
+    indices = which(grepl("^\\.[mczp]", colnames(e))) 
+    features = c(colnames(e)[indices], features)
+    indices = which(grepl("^\\.[t]", colnames(f)))
+    features = c(colnames(f)[indices], features)
+    features = c("cnv", "sim.target", "sim.chemical", features) 
     features = c("cosmic.in", "kegg.in", features)
-    #features = c("gexp", "cnv", "sim.chemical", "cosmic.in", features) # somewhat reliable sub
-    #features = c("cell.med", "comb.med", features)
+    features = c("guild.common", "guild.med", "guild.max", features)
+    #! features = c("cell.med", "comb.med", features) #!
+    #features = c("mut", features) # not included due to poor predictor performance
+    #features = c("k.diff", "k.min", "k.max", "dAB", features)
+    features = c("gexp", "met", "cnv", "sim.target", "sim.chemical", "cosmic.in", "kegg.in") #! somewhat reliable sub (except mut)
+    #!features = c("guild.common", "guild.med", "guild.max", features)
 
     # Use all features
     if(challenge == "ch1a") {
-	indices = which(grepl("^\\.[g]", colnames(e)))
-	features = c(colnames(e)[indices], features)
+	indices = which(grepl("^\\.[ge]", colnames(e))) #! try no e
+	features = c(colnames(e)[indices], features) 
 	features = c("einf", "h", "conc", "ic50", "gexp", "met", features)
     # Use anything except monotherapy data
     } else if(challenge == "ch2") {
-	indices = which(grepl("^\\.[g]", colnames(e)))
+	indices = which(grepl("^\\.[ge]", colnames(e)))
 	features = c(colnames(e)[indices], features)
 	features = c("gexp", "met", features)
     # Use anything except monotherapy, gexp and met data
     } else if(grepl("^ch1b", challenge)) {
 	# Nothing special
-	#! need to remove below
-	indices = which(grepl("^\\.[p]", colnames(e)))
+	indices = which(grepl("^\\.[z]", colnames(e))) #!
 	features = c(colnames(e)[indices], features)
-	features = c("gexp", features)
+	indices = which(grepl("^\\.[t]", colnames(f))) #!
+	features = c(colnames(f)[indices], features)
     } else {    
 	stop("Unrecognized challenge!")
     }
@@ -240,7 +253,7 @@ process.features<-function(f, challenge, is.train=T) {
 
 train.model<-function(challenge) {
     # Get synergy training data
-    f = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge, is.train=T)
+    f = get.synergy.data(challenge, is.train=T)
     # Create expression and mutation based features
     val = process.features(f, challenge, is.train=T)
     f = val$f
@@ -253,7 +266,7 @@ train.model<-function(challenge) {
     testing = f[-inTrain, ]
 
     # Build model(s)
-    if(F) { #!
+    if(T) { #!
 	# Simple decision tree for developmental/debugging purposes
 	#modFit = train(cat ~ ., data = training, method='ctree', tuneLength=10,
 	#	  trControl=trainControl(method='cv', number=10)) #, classProbs=F, summaryFunction=twoClassSummary))
@@ -378,11 +391,9 @@ train.model<-function(challenge) {
 get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     # Get test data
     if(challenge == "ch2") {
-	# will not be taken into account (since does not contain all cell lines)
-	#f = get.synergy.data("Drug_synergy_data/ch2_leaderBoard_monoTherapy.csv", challenge, is.train=F)
 	f = read.table(paste0(data.dir, "features_test_ch2.dat"), header=T)
     } else { 
-	f = get.synergy.data("Drug_synergy_data/ch1_leaderBoard_monoTherapy.csv", challenge, is.train=F)
+	f = get.synergy.data(challenge, is.train=F)
     }
     # Create expression and mutation based features
     val = process.features(f, challenge, is.train=F)
@@ -392,11 +403,12 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
     # Build models using all the training data
     if(rebuild) { 
 	# Get training data
-	f.training = get.synergy.data("Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv", challenge, is.train=T)
+	f.training = get.synergy.data(challenge, is.train=T)
 	val = process.features(f.training, challenge, is.train=T)
 	training = val$f
 	training.mod = val$f.mod
-	ctrl = trainControl(method = "cv")
+	#ctrl = trainControl(method = "cv")
+	ctrl = trainControl(method = "repeatedcv", number = 10, repeats = 3)
 	prep = NULL #c("center", "scale")
 	# Random forest
 	rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl)
@@ -481,7 +493,7 @@ predict.myClassifierClass = function(modelObject) {
 check.scoring<-function(challenge) {
     if(challenge == "ch2") {
 	#obs.file = paste0(output.dir, challenge, "/", "synergy_matrix.csv.test.observed")
-	obs.file = paste0(data.dir, "Drug_synergy_data/ch1_train_combination_and_monoTherapy.csv")
+	obs.file = paste0(data.dir, train.file)
 	pred.file = paste0(output.dir, challenge, "/", "synergy_matrix.csv.test")
 	conf.file = paste0(output.dir, challenge, "/", "confidence_matrix.csv.test")
 	# conf.file="none"
@@ -498,10 +510,11 @@ check.scoring<-function(challenge) {
 	pred.file = paste0(output.dir, challenge, "/", "prediction.csv.test")
 	conf.file = paste0(output.dir, challenge, "/", "combination_priority.csv.test")
 	# conf.file="none"
-	a = getDrugCombiScore_ch1(obs.file, pred.file, confidence=conf.file)
-	print(sprintf("Primary score: %.3f", a["mean"]))
 	a = getGlobalScore_ch1(obs.file, pred.file)
-	print(sprintf("Global score: %.3f (%.3f)", a["final"], a["tiebreak"]))
+	print(sprintf("Primary score: %.3f (%.3f)", a["final"], a["tiebreak"]))
+	print(sprintf("Partial correlation: %.3f", a["score"]))
+	a = getDrugCombiScore_ch1(obs.file, pred.file, confidence=conf.file)
+	print(sprintf("Secondary score: %.3f", a["mean"]))
     }
 }
 
