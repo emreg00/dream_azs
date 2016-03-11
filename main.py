@@ -296,6 +296,8 @@ def create_feature_file():
 		    vals[0] = cell_line_to_synergy[cell_line]
 		if comb_id in combination_to_synergy:
 		    vals[1] = combination_to_synergy[comb_id]
+		feature_values.extend(vals)
+		#print len(feature_values) 
 		# SIMILARITY
 		vals = ["NA"] * 2
 		if comb_id in combination_to_similarity:
@@ -399,12 +401,14 @@ def create_feature_file():
 		f.write("%s %s %s\n" % (comb_id, cell_line, " ".join(map(str, feature_values))))
 		#if comb_id == "BCL2L1.Vinorelbine" and cell_line == "NCI-H1437": 
 		#    return
-    f.close()
+    #f.close()
     print "Not in seen combinations:"
     for comb_id, cell_line_to_mono_values in combination_to_values.iteritems():
 	for cell_line in cell_line_to_mono_values:
 	    if (comb_id, cell_line) not in seen_combinations:
 		print comb_id, cell_line
+		f.write("%s %s %s\n" % (comb_id, cell_line, " ".join(map(str, [0]*len(feature_values))))) # to amend problematic ch2 test file
+    f.close()
     return
 
 
@@ -670,7 +674,7 @@ def get_synergy_values_per_cell_line_and_combination():
     for comb_id, cell_line_to_mono_values in combination_to_values.iteritems():
 	for cell_line, values in cell_line_to_mono_values.iteritems():
 	    cell_line_to_synergy.setdefault(cell_line, []).append(values[-1])
-	    combination_to_synergy.setdefault(combination, []).append(values[-1])
+	    combination_to_synergy.setdefault(comb_id, []).append(values[-1])
     for cell_line, values in cell_line_to_synergy.items():
 	cell_line_to_synergy[cell_line] = numpy.median(values)
     for combination, values in combination_to_synergy.items():
