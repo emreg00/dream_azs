@@ -12,22 +12,26 @@ train.file = "Drug_synergy_data/train_merged.csv"
 test.file = "Drug_synergy_data/ch1_test_monoTherapy.csv"
 
 main<-function() {
-    #set.seed(142341) 
-    set.seed(555444)
+    set.seed(142341) 
+    #set.seed(555444)
     #set.seed(999999)
     #!
+    #run_mode = "only_train"
+    run_mode = "only_predict"
+    #run_mode = "train_and_predict"
     #challenge = "ch1a"
-    challenge = "ch1b" 
-    #challenge = "ch2" 
-    rfFit = NULL
-    gbmFit = NULL
-    modFit = NULL
-    mod.list = train.model(challenge)
-    return() #!
-    rfFit = mod.list$rfFit
-    gbmFit = mod.list$gbmFit
-    modFit = mod.list$modFit
-    get.predictions(challenge, rfFit, gbmFit, modFit, rebuild=T) 
+    #challenge = "ch1b" 
+    challenge = "ch2" 
+    mod.list = list(rfFit=NULL, gbmFit=NULL, modFit=NULL)
+    if(run_mode == "only_train" | run_mode =="train_and_predict") {
+	mod.list = train.model(challenge)
+    } 
+    if(run_mode == "train_and_predict" | run_mode =="only_predict") {
+	rfFit = mod.list$rfFit
+	gbmFit = mod.list$gbmFit
+	modFit = mod.list$modFit
+	get.predictions(challenge, rfFit, gbmFit, modFit, rebuild=T) 
+    }
 }
 
 
@@ -57,19 +61,22 @@ process.features<-function(f, challenge, is.train=T) {
     } else {
 	e = read.table(paste0(data.dir, "features_test_ch1.dat"), header=T)
     }
-    d = read.csv(paste0(data.dir, "cell_info.csv")) 
-    # Put tissue info as a categorized feature
-    d = data.frame(row.names = d$Sanger.Name, tissue = gsub("[ /()]", ".", d$Tissue..General.))
-    f$.t = d[f$CELL_LINE, "tissue"]
-    f = cbind(f, model.matrix(~.t + 0, f))
-    f = f[,-which(colnames(f) == ".t")]
-    #ggplot(f, aes(x=CELL_LINE, y=SYNERGY_SCORE)) + geom_boxplot(aes(color=tissue))
-    #print(summary(f))
+    if(challenge != "ch2") { # need to be in features file created by python
+	d = read.csv(paste0(data.dir, "cell_info.csv")) 
+	# Put tissue info as a categorized feature
+	d = data.frame(row.names = d$Sanger.Name, tissue = gsub("[ /()]", ".", d$Tissue..General.))
+	f$.t = d[f$CELL_LINE, "tissue"]
+	f = cbind(f, model.matrix(~.t + 0, f))
+	f = f[,-which(colnames(f) == ".t")]
+	#ggplot(f, aes(x=CELL_LINE, y=SYNERGY_SCORE)) + geom_boxplot(aes(color=tissue))
+	#print(summary(f))
+    }
 
     #e$gexp = ifelse(is.na(abs(e$gexpA-e$gexpB)), min(abs(e$gexpA), abs(e$gexpB), na.rm=T), abs(e$gexpA-e$gexpB))
-    #e$gexp = abs(e$gexpA.amed - e$gexpB.amed) 
-    e$gexp = e$gexpA.med * e$gexpB.med
-    e$met = e$metA.med * e$metB.med
+    e$gexp.diff = abs(e$gexpA.amed - e$gexpB.amed) 
+    e$gexp = e$gexpA.amed * e$gexpB.amed 
+    e$met.diff = abs(e$metA.amed - e$metB.amed)
+    e$met = e$metA.amed * e$metB.amed 
     e$mut = ifelse(is.na(abs(e$mutA-e$mutB)), min(e$mutA, e$mutB, na.rm=T), abs(e$mutA-e$mutB))
     #e[is.na(e$mut), "mut"] = 0 
     #e$cnv = ifelse(is.na(abs(e$cnvA-e$cnvB)), min(e$cnvA, e$cnvB, na.rm=T), abs(e$cnvA-e$cnvB))
@@ -148,7 +155,7 @@ process.features<-function(f, challenge, is.train=T) {
     #features = c("gexp", "cnv", "sim.chemical", "cosmic.in", features) # somewhat reliable sub
     #!
     features = c()
-    indices = which(grepl("^\\.[t]", colnames(f)))  # (m/g/e/z/c/p likely to worsen for ch1 if only gbm is used)
+    indices = which(grepl("^\\.[cp]", colnames(f)))  # mz (m/g/e/z/c/p likely to worsen on ch1 train if only gbm is used)
     features = c(colnames(f)[indices], features)
     features = c("cnv", "sim.target", "sim.chemical", features) 
     features = c("cosmic.in", "kegg.in", features)
@@ -167,22 +174,25 @@ process.features<-function(f, challenge, is.train=T) {
 
     # Use all features
     if(challenge == "ch1a") {
-	#indices = which(grepl("^\\.[ge]", colnames(f)))
-	##f[,indices] = abs(f[,indices]) # use abs for e
-	#features = c(colnames(f)[indices], features) 
-	#features = c("einf", "h", "conc", "ic50", features) # worsen
-	#features = c("gexp", "met", features) # worsen
+	indices = which(grepl("^\\.[t]", colnames(f)))  
+	features = c(colnames(f)[indices], features)
+	indices = which(grepl("^\\.[ge]", colnames(f)))
+	features = c(colnames(f)[indices], features) 
+	features = c("einf", "h", "conc", "ic50", features) # likely toworsen
+	features = c("gexp", "met", features) 
+	features = c("gexp.diff", "met.diff", features) 
     # Use anything except monotherapy data
     } else if(challenge == "ch2") {
-	#indices = which(grepl("^\\.[e]", colnames(f)))
-	#f[,indices] = abs(f[,indices]) # use abs for e
-	#features = c(colnames(f)[indices], features)
-	indices = which(grepl("^\\.[gcp]", colnames(f))) #mz
+	indices = which(grepl("^\\.[ge]", colnames(f)))
 	features = c(colnames(f)[indices], features)
+	#f[,indices] = abs(f[,indices]) # use abs for e (and for g)
 	features = c("gexp", "met", features)
+	features = c("gexp.diff", "met.diff", features) 
     # Use anything except monotherapy, gexp and met data
     } else if(grepl("^ch1b", challenge)) {
 	# Nothing special
+	indices = which(grepl("^\\.[t]", colnames(f)))  
+	features = c(colnames(f)[indices], features)
     } else {    
 	stop("Unrecognized challenge!")
     }
@@ -272,13 +282,15 @@ train.model<-function(challenge) {
     testing = f[-inTrain, ]
 
     # Build model(s)
-    if(T) { #!
+    if(T) { 
 	# Simple decision tree for developmental/debugging purposes
 	#modFit = train(cat ~ ., data = training, method='ctree', tuneLength=10,
 	#	  trControl=trainControl(method='cv', number=10)) #, classProbs=F, summaryFunction=twoClassSummary))
 	#modFit = myClassifier(training)
 	rfFit = NULL
 	gbmFit = NULL
+	modFit = NULL
+	#ml.methods = c("gbm")
 	#ml.methods = c("ctree")
 	#ml.methods = c("glmnet")
 	ml.methods = c("rf", "gbm") 
@@ -303,7 +315,7 @@ train.model<-function(challenge) {
 	    print(ml.method)
 	    modFit = train(cat ~ ., data = training, method = ml.method, trControl = ctrl, verbose=F) 
 	    pred = predict(modFit, testing)
-	    #print(predictors(modFit))
+	    print(predictors(modFit))
 	    #print(modFit)
 	    if(challenge == "ch2") { 
 		a = confusionMatrix(pred, testing$cat)
@@ -323,8 +335,19 @@ train.model<-function(challenge) {
 	    output.predictions(challenge, f.mod[-inTrain,], testing, suffix=".test")
 	    # Get organizer's scores
 	    check.scoring(challenge) 
+	    
+	    if(ml.method == "rf") {
+		rfFit = modFit
+	    } else if(ml.method == "gbm") {
+		gbmFit = modFit
+	    }
 	}
-	return(list(rfFit=rfFit, gbmFit=gbmFit, modFit=modFit)); 
+	# gam to combine to predictors e.g., rf gbm
+	pred.1 = predict(rfFit, testing)
+	pred.2 = predict(gbmFit, testing)
+	pred.comb = data.frame(pred.1, pred.2, cat=testing$cat)
+	modFit = train(cat ~ ., data=pred.comb, method = "gam")
+	pred = predict(modFit, testing)
     } else {
 	# trainControl: boot for bootstrapping, cv for x-validation # repeatedcv for repeated 10-fold CV 
 	#ctrl = trainControl(method = "cv", number = 10) 
@@ -415,24 +438,28 @@ get.predictions<-function(challenge, rfFit, gbmFit, modFit, rebuild=F) {
 	#ctrl = trainControl(method = "cv")
 	ctrl = trainControl(method = "repeatedcv", number = 10, repeats = 3)
 	prep = NULL #c("center", "scale")
-	# Random forest
-	#rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl)
-	#pred.1 = predict(rfFit, training)  
-	# Tree boost
-	gbmFit = train(cat ~ ., data=training, method = "gbm", preProcess = prep, trControl = ctrl, verbose=F)
-	#pred.2 = predict(gbmFit, training)  
-	#pred.comb = data.frame(pred.1, pred.2, cat=training$cat)
-	#modFit = train(cat ~ ., data=pred.comb, method = "gam")
-	rfFit = NULL
-	modFit = gbmFit
+	if(challenge == "ch2") {
+	    rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl)
+	    #rfFit = NULL
+	    gbmFit = NULL
+	    modFit = rfFit
+	} else {
+	    # Random forest
+	    rfFit = train(cat ~ ., data=training, method = "rf", preProcess = prep, trControl = ctrl)
+	    pred.1 = predict(rfFit, training)  
+	    # Tree boost
+	    gbmFit = train(cat ~ ., data=training, method = "gbm", preProcess = prep, trControl = ctrl, verbose=F)
+	    pred.2 = predict(gbmFit, training)  
+	    pred.comb = data.frame(pred.1, pred.2, cat=training$cat)
+	    modFit = train(cat ~ ., data=pred.comb, method = "gam")
+	}
     }
 
     # Make predictions using model(s)
-    if(is.null(rfFit)) {
+    if(is.null(rfFit) | is.null(gbmFit)) {
 	pred = predict(modFit, testing)
     } else {
 	pred.1 = predict(rfFit, testing)  
-	#pred.1 = predict(rfFit, testing, type = "prob") # prob not meaningful for RF
 	pred.2 = predict(gbmFit, testing) 
 	pred.comb = data.frame(pred.1, pred.2)
 	pred = predict(modFit, pred.comb)
