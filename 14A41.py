@@ -1,6 +1,5 @@
 
 from toolbox import configuration, guild_utilities, wrappers, network_utilities
-from rdbox import drug_info
 from time import strftime
 import os, csv, numpy, cPickle
 try:
@@ -33,41 +32,6 @@ def get_drug_info_with_predicted_targets():
 	    drug, targets, targets_org = line.strip("\n").split("\t")
 	    if targets != "":
 		drug_to_targets_predicted[drug] = set(targets.split(", "))
-    else:
-	#smiles_list = ["[H][C@]12C[C@@H](O)C=C[C@]11CCN(C)CC3=C1C(O2)=C(OC)C=C3"]
-	smiles_list = []
-	smiles_to_drug = {}
-	for drug, values in drug_to_values.iteritems():
-	    smiles = values[1] 
-	    if smiles.strip() == "":
-		continue
-	    smiles_list.append(smiles)
-	    smiles_to_drug[smiles] = drug
-	# Get SMILES similarity based predictions
-	#smiles_to_geneids = drug_info.get_chemical_similarity_based_target_predictions(CONFIG, smiles_list, cutoff=0.7, method="any_smiles") # majority_above
-	# Fisher's based test for taking into account of abundance of same target in many similar / dissimilar smiles
-	smiles_to_geneids = drug_info.get_chemical_similarity_based_target_predictions(CONFIG, smiles_list, cutoff=0.6, method="fishers") # 0.7 
-	#print len(smiles_to_geneids), smiles_to_geneids.items()[:5]
-	# Get gene names
-	geneid_to_names, name_to_geneid = wrappers.get_geneid_symbol_mapping(CONFIG.get("id_mapping_file"))
-	f = open(file_name, 'w')
-	f.write("Drug\tTargets (Predicted)\tTargets (Original)\n")
-	for smiles in smiles_list:
-	    genes = set()
-	    if smiles in smiles_to_geneids:
-		for geneid in smiles_to_geneids[smiles]:
-		    genes |= geneid_to_names[geneid]
-	    genes = list(genes)
-	    genes.sort()
-	    #f.write("%s\t%s\t%s\n" % (smiles_to_drug[smiles], smiles, ", ".join(genes)))
-	    targets_org = []
-	    if smiles in smiles_to_drug:
-		drug = smiles_to_drug[smiles]
-		if drug in drug_to_values:
-		    targets_org = drug_to_values[drug][0]
-	    f.write("%s\t%s\t%s\n" % (smiles_to_drug[smiles], ", ".join(genes), ", ".join(targets_org)))
-	f.close()
-    # Can check targets from STITCH for benchmarking
     for drug, values in drug_to_values.iteritems():
 	if drug in drug_to_targets_predicted:
 	    targets_predicted = drug_to_targets_predicted[drug]
@@ -743,6 +707,20 @@ def create_edge_file(network):
     return
 
 
+def create_node_file(drug, target_to_score, nodes):
+    output_dir = CONFIG.get("output_dir") + "/"
+    node_file = "%s%s.node" % (output_dir, drug)
+    f = open(node_file, 'w')
+    for node in nodes:
+	if node in target_to_score:
+	    score = target_to_score[node]
+	else:
+	    score = 0.01
+	f.write("%s %f\n" % (node, score))
+    f.close()
+    return
+
+
 def get_guild_based_synergy_scores(drugs, genes_pathway, gexp_norm, gene_to_idx, cell_line_to_idx):
     output_dir = CONFIG.get("output_dir") + "/"
     use_expression = CONFIG.get("use_expression")
@@ -950,11 +928,26 @@ def guild_drugs(drug_to_values, nodes, gexp_norm, gene_to_idx, cell_line_to_idx)
 
 
 def run_guild(drug, target_to_score, nodes, qname=None): #targets
+    # Create node file
+    create_node_file(drug, target_to_score, nodes)
     # Get parameters
-    network_lcc_file = CONFIG.get("network_file") + ".lcc"
-    output_dir = CONFIG.get("output_dir") + "/"
     executable_path = CONFIG.get("guild_path") 
-    wrappers.run_guild(drug, target_to_score, nodes, network_lcc_file, output_dir, executable_path, qname)
+    output_dir = CONFIG.get("output_dir") + "/"
+    network_lcc_file = CONFIG.get("network_file") + ".lcc"
+    output_file = "%s%s.ns" % (output_dir, drug)
+    node_file = "%s%s.node" % (output_dir, drug)
+    n_repetition = int(CONFIG.get("n_repetition"))
+    n_iteration = int(CONFIG.get("n_iteration"))
+    # Get and run the GUILD command
+    #print strftime("%H:%M:%S - %d %b %Y") #, score_command
+    score_command = ' -s s -n "%s" -e "%s" -o "%s" -r %d -i %d' % (node_file, network_lcc_file, output_file, n_repetition, n_iteration)
+    if qname is None:
+	score_command = executable_path + score_command
+	os.system(score_command)
+    else:
+	#os.system("qsub -cwd -o out -e err -q %s -N %s -b y %s" % (qname, scoring_type, score_command))
+	#print "qsub -cwd -o out -e err -q %s -N guild_%s -b y %s" % (qname, drug, score_command)
+	print "%s" % (score_command.replace('"', ''))
     return
 
 

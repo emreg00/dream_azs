@@ -35,6 +35,59 @@ main<-function() {
 }
 
 
+get.biomarkers<-function() {
+    # Get predictions
+    file.name = paste0(output.dir, "ch1b/prediction.csv")
+    d = read.csv(file.name)
+    # Get features
+    file.name = paste0(data.dir, "features_test_ch1.dat")
+    f = read.table(file.name, header=T)
+    # Get combinations of interest
+    file.name = paste0(data.dir, "biomarkers.csv")
+    e = read.csv(file.name)
+    comb.ids = e$comb.id
+    # Put tissue info as a categorized feature
+    file.name = paste0(data.dir, "cell_info.csv")
+    e = read.csv(file.name) 
+    e = data.frame(row.names = e$Sanger.Name, tissue = gsub("[ /()]", ".", e$Tissue..General.))
+    f$.t = e[f$cell.line, "tissue"]
+    f = cbind(f, model.matrix(~.t + 0, f))
+    f = f[,-which(colnames(f) == ".t")]
+    # Preprocess features
+    f$cnv = abs(f$cnvA - f$cnvB)
+    f$kegg.in = (f$kegg.inA + f$kegg.inB) 
+    f$cosmic.in = (f$cosmic.inA + f$cosmic.inB) 
+    features = c("comb.id","cell.line","cnv","cosmic.in","kegg.in","sim.chemical","sim.target","guild.common","guild.med","guild.max") 
+    features = c(features,"cell.med","comb.med")
+    features = c(features,".tbreast",".tlung",".turinary.tract")
+    features = c(features,".tblood.lymph",".tgastrointestinal.tract..lower.",".tgastrointestinal.tract..upper.",".tmale.genital.system",".tsoft.tissue")
+    f = f[,features]
+    #d[d$COMBINATION_ID=="AKT.BCL2L1",]
+    #f[f$comb.id == "AKT.BCL2L1" & f$cell.line=="MDA-MB-453",]
+    e = d[d$COMBINATION_ID %in% comb.ids,]
+    m = nrow(e)
+    n = ncol(e) + ncol(f)
+    e.mod = data.frame(matrix(nrow=m, ncol=n))
+    for(i in 1:m) {
+	comb = as.character(e[i, "COMBINATION_ID"])
+	cell = as.character(e[i, "CELL_LINE"])
+	e.mod[i,] = c(e[i,], f[f$comb.id == comb & f$cell.line == cell, ])
+    }
+    colnames(e.mod) = c(colnames(e), colnames(f))
+    # To correct integer converted comb names and cell lines
+    e.mod$comb.id = factor(e$COMBINATION_ID)
+    e.mod$cell.line = factor(e$CELL_LINE)
+    e = e.mod[,-c(1,2)]
+    fit = aov(PREDICTION ~ cnv + guild.common + guild.med + sim.chemical + kegg.in + cosmic.in, data=e)
+    summary(fit)
+    e.sub = e[abs(e$PREDICTION)>=20,]
+    features.sub = c("cnv","sim.chemical","cosmic.in","kegg.in","guild.med","guild.common")
+    for(feature in features.sub) {
+	a = cor.test(e.sub$PREDICTION, e.sub[[feature]], method="spearman")
+	print(c(feature, a$estimate))
+    }
+}
+
 get.synergy.data<-function(challenge, is.train) {
     if(is.train) {
 	file.name = train.file
