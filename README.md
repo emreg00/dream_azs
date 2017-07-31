@@ -1,10 +1,10 @@
 # Understanding molecular bases of drug response and synergy: An ensemble learning approach using diverse molecular and interactome-based signatures
 
-##Summary Sentence
+## Summary Sentence
 To build a predictor quantifying synergy between two compounds, we defined molecular and interactome based features and combined Random Forest and Stochastic Gradient Boosting algorithms.
 
 
-##Background/Introduction
+## Background/Introduction
 Understanding synergistic effects of drugs is key to develop effective intervention strategies targeting diseases and provides unprecedented opportunities to repurpose existing drugs. 
 Existing studies have suggested defining genomics, transcriptomics, pathway involvement and interactome-based features to explain drug synergy (Sun et al., 2015). 
 During the initial rounds of the challenge, we have observed that even a simple machine learning predictor using monotherapy response data performs as good as the average submitte models, suggesting that the key tasks in the challenge are (i) defining descriptive features and (ii) building robust learning models. 
@@ -15,7 +15,7 @@ We have also included tissue information of cell lines and pathway involvement o
 After data cleaning and normalization (i.e. removing insensitive cell lines and missing data points, imputation etc...), we have systematically tested several machine learning approaches and finally built a combined Random Forest and Gradient Boosted Machine predictor.
 
 
-##Methods
+## Methods
 
 *Gene expression and methylation data*
 
@@ -141,7 +141,7 @@ We used the full training data set in the submission (as opposed to 70% split us
 - For challenge 2, we used all the features in 1A but used only Random Forest classifier (instead of RF + GBM)
 
 
-##Conclusion/Discussion                                    
+## Conclusion/Discussion                                    
 
 The first challenge had two subtasks: predicting drug synergy *(i)* using mono synergy and genomics data *(ii)* without using mono synergy, gene expression and methylation data. 
 The participants could use any other data source (such as cell line data, gene mutation, drug target information provided in the challenge or external data sets). 
@@ -156,7 +156,7 @@ Based on our experience during the challenge, we summarize the observations we h
 - Combining RF and GBM models tend to result higher accuracy than using them individually
 
 
-##References
+## References
 * AZ-Sanger Drug Combination Prediction DREAM Challenge (#!Synapse:syn4231880)
 * Sun et al., 2015, Nat Comms, "Combining genomic and network characteristics for extended capability in predicting synergistic drugs for cancer"
 * Liu et al., 2013, Bioinformatics, "HitPick: a web server for hit identification and target prediction of chemical screenings"
